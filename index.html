@@ -341,8 +341,8 @@ function calcPair(pair,course,scores){
     const sf1=sfPts(g1,h.par,allow1);
     const sf2=sfPts(g2,h.par,allow2);
     const holeDiff=sf1-sf2;
-    if(sf1>sf2)pts1+=sf1-sf2;
-    else if(sf2>sf1)pts2+=sf2-sf1;
+    if(sf1>sf2)pts1+=sf1;
+    else if(sf2>sf1)pts2+=sf2;
     // net strokes using HC diff allowance, capped at par+3 (net triple bogey)
     const net1=Math.min(g1-allow1,h.par+3);
     const net2=Math.min(g2-allow2,h.par+3);
