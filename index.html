@@ -2005,6 +2005,7 @@ function App(){
     return localStorage.getItem(LS_URL)||DEFAULT_GAS;
   });
   const [data,setData]=useState(()=>{try{const c=localStorage.getItem(LS_DATA);return c?JSON.parse(c):DEFAULT_DATA;}catch{return DEFAULT_DATA;}});
+  const [loading,setLoading]=useState(true); // always show loading until GAS responds
   const [status,setStatus]=useState(()=>{
     const u=localStorage.getItem(LS_URL);
     if(!u)return"none";
@@ -2015,13 +2016,18 @@ function App(){
   const [showLogin,setShowLogin]=useState(false);
 
   const testAndLoad=useCallback(async(u)=>{
-    if(!u)return;setStatus("busy");
+    if(!u){setLoading(false);return;}
+    setStatus("busy");
+    // Fallback: if GAS takes >12s, show cached data rather than hang forever
+    const timeout=setTimeout(()=>setLoading(false),12000);
     try{
       const r=await apiGet(u,"getAll");
       const merged={players:r.players?.length?r.players:data.players,courses:r.courses?.length?r.courses:data.courses,scores:r.scores||[],tournaments:r.tournaments||[]};
       setData(merged);localStorage.setItem(LS_DATA,JSON.stringify(merged));
       localStorage.setItem("llg_connected","1");setStatus("ok");
     }catch(e){console.error(e);setStatus("err");}
+    clearTimeout(timeout);
+    setLoading(false);
   },[]);
 
   const refresh=useCallback(async()=>{
@@ -2034,7 +2040,18 @@ function App(){
     }catch(e){setStatus("err");}
   },[url]);
 
-  useEffect(()=>{if(url)testAndLoad(url);},[]);
+  useEffect(()=>{testAndLoad(url);},[]);
+
+  // Show splash/loading screen until GAS responds on every open
+  if(loading)return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--green)",gap:16}}>
+      <img src={LOGO_SRC} style={{width:90,height:90,borderRadius:"50%",border:"3px solid var(--gold-light)"}}/>
+      <div style={{fontFamily:"Playfair Display,serif",fontSize:20,fontWeight:700,color:"var(--gold-light)"}}>Lucky Last Golfers</div>
+      <div style={{display:"flex",alignItems:"center",gap:8,color:"rgba(255,255,255,.6)",fontSize:13}}>
+        <span className="spinner"/>Syncing data…
+      </div>
+    </div>
+  );
 
   const navClick=(id)=>{
     if(id==="setup"){
