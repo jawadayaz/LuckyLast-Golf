@@ -1209,7 +1209,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
             const pickedElsewhere=new Set(t.teams.filter(ot=>ot.id!==team.id&&savedTeams.has(ot.id)).flatMap(ot=>ot.playerIds||[]));
             const teamPlayers=data.players.filter(p=>(team.playerIds||[]).includes(p.id));
             return(
-              <div key={team.id} style={{marginBottom:10,border:"2px solid "+TBORD[ti%TBORD.length],borderRadius:9,overflow:"hidden"}}>
+              <div key={team.id} style={{marginBottom:10,border:"2px solid "+TBORD[ti%TBORD.length],borderRadius:9}}>
                 {/* Team header — always visible */}
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:TCOLS[ti%TCOLS.length],cursor:isSaved?"pointer":"default"}}
                   onClick={()=>isSaved&&setExpandedTeam(isExpanded?null:team.id)}>
@@ -1230,7 +1230,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                 {(!isSaved||isExpanded)&&(
                   <div style={{padding:"10px 13px",background:"white"}}>
                     <div style={{fontSize:11,fontWeight:600,color:"var(--gray-400)",textTransform:"uppercase",letterSpacing:.6,marginBottom:8}}>Select Players</div>
-                    <div className="psel">
+                    <div className="psel" style={{maxHeight:220,overflowY:"auto",paddingRight:4}}>
                       {data.players.map(p=>{
                         const inThis=(team.playerIds||[]).includes(p.id);
                         const taken=pickedElsewhere.has(p.id);
@@ -1244,9 +1244,11 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                         );
                       })}
                     </div>
-                    <div style={{display:"flex",gap:8,marginTop:10}}>
-                      <button className="btn btn-primary" style={{flex:1}} onClick={()=>saveTeam(team.id)}
-                        disabled={!(team.playerIds?.length>0)}>Save Team</button>
+                    <div style={{marginTop:10}}>
+                      <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>{
+                        if(!(team.playerIds?.length>0)){N("Add at least one player to the team","err");return;}
+                        saveTeam(team.id);
+                      }}>Save Team ✓</button>
                     </div>
                   </div>
                 )}
