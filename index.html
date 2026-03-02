@@ -1178,7 +1178,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
           {id:"details",label:"Details"},
           {id:"teams",label:`Teams (${t.teams.length})`},
           {id:"groups",label:`Groups (${t.groups.length})`},
-          {id:"pairs",label:`Ratarata Pairs (${t.pairs.length})`},
+          {id:"pairs",label:`Ratha Ratha Pairs (${t.pairs.length})`},
         ].map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")} onClick={()=>setTab(s.id)}>{s.label}</div>)}
       </div>
 
@@ -1194,7 +1194,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
             </div>
           </div>
           <div style={{marginTop:16,padding:12,background:"var(--gray-50)",borderRadius:8,fontSize:12.5,color:"var(--gray-600)"}}>
-            <strong>How it works:</strong> Teams use Modified Stableford (75% HC). Groups become scorecards. Ratarata pairs compete hole-by-hole.
+            <strong>How it works:</strong> Teams use Modified Stableford (75% HC). Groups become scorecards. Ratha Ratha pairs compete hole-by-hole.
           </div>
         </div>
       )}
@@ -1309,8 +1309,8 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
 
       {tab==="pairs"&&(
         <div className="card">
-          <div className="card-title">Ratarata Pairs <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addPair}>+ Add Pair</button></div>
-          <Alrt type="info" msg="A player can be in multiple pairs. Override HC per pair — used only for Ratarata scoring."/>
+          <div className="card-title">Ratha Ratha Pairs <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addPair}>+ Add Pair</button></div>
+          <Alrt type="info" msg="A player can be in multiple pairs. Override HC per pair — used only for Ratha Ratha scoring."/>
           {!t.pairs.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No pairs yet.</p>}
           {t.pairs.map((pair,pi)=>{
             const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
@@ -1650,7 +1650,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       lines.push(``);
     }
     if(pairResults.length){
-      lines.push("*⚔️ Ratarata Pairs:*");
+      lines.push("*⚔️ Ratha Ratha Pairs:*");
       pairResults.forEach((r,i)=>{
         const scoredHoles=r.holes.filter(h=>h.net1!==null);
         const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
@@ -1665,7 +1665,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
         const ptsPart=ptsWinner?`${ptsWinner} ${waVerb} by ${ptsDiff} pt${ptsDiff!==1?"s":""}`:null;
         const netPart=netDiff>0?`${netDiff} stroke${netDiff!==1?"s":""}`:null;
         const summary=ptsPart&&netPart?`${ptsPart} and ${netPart}`:ptsPart||"Tied";
-        const hcNote=r.hcpDiff>0?` (+${r.hcpDiff} to ${r.hcp1>r.hcp2?p2n:p1n})`:"";
+        const hcNote=r.hcpDiff>0?` (+${r.hcpDiff} to ${r.hcp1>r.hcp2?p1n:p2n})`:"";
         lines.push(`  Pair ${i+1}: ${r.p1.name} vs ${r.p2.name}${hcNote}`);
         lines.push(`    ${r.pts1} – ${r.pts2} pts | Net: ${totalNet1} – ${totalNet2}`);
         lines.push(`    ${summary}`);
@@ -1682,7 +1682,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
   const tabs=[
     {id:"individual",label:"All Players"},
     {id:"scorecards",label:`Scorecards (${t.groups?.length||0})`},
-    {id:"pairs",label:`Ratarata (${pairResults.length} pairs)`},
+    {id:"pairs",label:`Ratha Ratha (${pairResults.length} pairs)`},
     t.teams?.length&&{id:"teams",label:`Teams (${teamResults.length})`},
   ].filter(Boolean);
 
@@ -1805,8 +1805,8 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                 const summary=ptsPart&&netPart?`${ptsPart} and ${netPart}`:ptsPart||netPart||null;
                 return(<>
                 <div className="card-title">
-                  Pair {i+1}
-                  {r.hcpDiff>0?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>({r.hcp1>r.hcp2?r.p1.name:r.p2.name} +{r.hcpDiff})</span>:null}
+                  <span>Pair {i+1}: {r.p1.name.split(" ")[0]} vs {r.p2.name.split(" ")[0]}</span>
+                  {r.hcpDiff>0?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.hcp1>r.hcp2?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>:null}
                 </div>
                 {/* Always-visible summary */}
                 <div style={{marginBottom:10,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
