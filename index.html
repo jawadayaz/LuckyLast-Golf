@@ -1122,6 +1122,8 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   const [tab,setTab]=useState("details");
   const [msg,setMsg]=useState(null);
   const [teamName,setTeamName]=useState("");
+  const [savedTeams,setSavedTeams]=useState(new Set());
+  const [expandedTeam,setExpandedTeam]=useState(null);
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),3500);};
 
   const set=(k,v)=>updateT(t.id,x=>({...x,[k]:v}));
@@ -1129,9 +1131,12 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   // ── Teams ──
   const addTeam=()=>{
     if(!teamName.trim())return;
-    updateT(t.id,x=>({...x,teams:[...x.teams,{id:Date.now(),name:teamName.trim(),playerIds:[]}]}));
+    const newId=Date.now();
+    updateT(t.id,x=>({...x,teams:[...x.teams,{id:newId,name:teamName.trim(),playerIds:[]}]}));
     setTeamName("");
+    setExpandedTeam(newId);
   };
+  const saveTeam=(tid)=>{setSavedTeams(prev=>new Set([...prev,tid]));setExpandedTeam(null);};
   const removeTeam=(tid)=>updateT(t.id,x=>({...x,teams:x.teams.filter(t=>t.id!==tid)}));
   const toggleTeamP=(teamId,pid)=>updateT(t.id,x=>({...x,
     teams:x.teams.map(t=>t.id===teamId?{...t,playerIds:t.playerIds?.includes(pid)?t.playerIds.filter(i=>i!==pid):[...(t.playerIds||[]),pid]}:t)
@@ -1197,34 +1202,70 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
       {tab==="teams"&&(
         <div className="card">
           <div className="card-title">Teams <span style={{fontSize:12,fontWeight:400,color:"var(--gray-400)"}}>— optional, scored on Modified Stableford (75%)</span></div>
-          <div style={{display:"flex",gap:8,marginBottom:14}}>
-            <div className="ff" style={{flex:1}}><label>Team Name</label><input value={teamName} onChange={e=>setTeamName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTeam()} placeholder="Team Alpha"/></div>
-            <button className="btn btn-primary" style={{alignSelf:"flex-end"}} onClick={addTeam}>Add Team</button>
-          </div>
-          {!t.teams.length&&<p style={{fontSize:13,color:"var(--gray-400)"}}>No teams — teams are optional.</p>}
-          {t.teams.map((team,ti)=>(
-            <div key={team.id} style={{marginBottom:12,padding:13,border:"2px solid "+TBORD[ti%TBORD.length],borderRadius:9,background:TCOLS[ti%TCOLS.length]}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                <div style={{fontWeight:700,fontSize:13}}>{team.name} <span style={{fontWeight:400,color:"var(--gray-600)",fontSize:12}}>({(team.playerIds||[]).length} players)</span></div>
-                <button className="btn btn-sm btn-danger" onClick={()=>removeTeam(team.id)}>Remove</button>
-              </div>
-              <div className="psel">
-                {data.players.filter(p=>{
-                  const inThis=team.playerIds?.includes(p.id);
-                  const inOther=t.teams.some(ot=>ot.id!==team.id&&(ot.playerIds||[]).includes(p.id));
-                  return inThis||!inOther;
-                }).map(p=>{
-                  const inThis=team.playerIds?.includes(p.id);
-                  return(
-                    <div key={p.id} className={"pchip"+(inThis?" on":"")} onClick={()=>toggleTeamP(team.id,p.id)}>
-                      <span>{inThis?"✓":"○"}</span>
-                      <span style={{flex:1}}>{p.name}</span><span className="hc">{p.handicap}</span>
+          {!t.teams.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginBottom:14}}>No teams yet — teams are optional.</p>}
+          {t.teams.map((team,ti)=>{
+            const isSaved=savedTeams.has(team.id);
+            const isExpanded=expandedTeam===team.id;
+            const pickedElsewhere=new Set(t.teams.filter(ot=>ot.id!==team.id&&savedTeams.has(ot.id)).flatMap(ot=>ot.playerIds||[]));
+            const teamPlayers=data.players.filter(p=>(team.playerIds||[]).includes(p.id));
+            return(
+              <div key={team.id} style={{marginBottom:10,border:"2px solid "+TBORD[ti%TBORD.length],borderRadius:9,overflow:"hidden"}}>
+                {/* Team header — always visible */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:TCOLS[ti%TCOLS.length],cursor:isSaved?"pointer":"default"}}
+                  onClick={()=>isSaved&&setExpandedTeam(isExpanded?null:team.id)}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--gray-800)"}}>{team.name}</div>
+                    <div style={{fontSize:11,color:"var(--gray-600)",marginTop:2}}>
+                      {teamPlayers.length?teamPlayers.map(p=>p.name).join(" · "):"No players yet"}
+                      {isSaved&&<span style={{marginLeft:6,color:"var(--green)",fontWeight:600}}>✓ Saved</span>}
                     </div>
-                  );
-                })}
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    {isSaved&&<span style={{fontSize:11,color:"var(--gray-400)"}}>{isExpanded?"▲":"▼"}</span>}
+                    <button className="btn btn-sm btn-danger" onClick={e=>{e.stopPropagation();removeTeam(team.id);setSavedTeams(prev=>{const n=new Set(prev);n.delete(team.id);return n;});}}
+                      >Remove</button>
+                  </div>
+                </div>
+                {/* Player picker — shown when editing (not saved, or expanded) */}
+                {(!isSaved||isExpanded)&&(
+                  <div style={{padding:"10px 13px",background:"white"}}>
+                    <div style={{fontSize:11,fontWeight:600,color:"var(--gray-400)",textTransform:"uppercase",letterSpacing:.6,marginBottom:8}}>Select Players</div>
+                    <div className="psel">
+                      {data.players.map(p=>{
+                        const inThis=(team.playerIds||[]).includes(p.id);
+                        const taken=pickedElsewhere.has(p.id);
+                        return(
+                          <div key={p.id} className={"pchip"+(inThis?" on":taken?" disabled":"")}
+                            onClick={()=>!taken&&toggleTeamP(team.id,p.id)}>
+                            <span>{inThis?"✓":taken?"—":"○"}</span>
+                            <span style={{flex:1}}>{p.name}</span>
+                            <span className="hc">{p.handicap}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",gap:8,marginTop:10}}>
+                      <button className="btn btn-primary" style={{flex:1}} onClick={()=>saveTeam(team.id)}
+                        disabled={!(team.playerIds?.length>0)}>Save Team</button>
+                    </div>
+                  </div>
+                )}
               </div>
+            );
+          })}
+          {/* Add next team — only show if no unsaved team exists */}
+          {!t.teams.some(tm=>!savedTeams.has(tm.id))&&(
+            <div style={{display:"flex",gap:8,marginTop:t.teams.length?12:0}}>
+              <div className="ff" style={{flex:1}}><label>Team Name</label>
+                <input value={teamName} onChange={e=>setTeamName(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addTeam()} placeholder="e.g. Eagles"/>
+              </div>
+              <button className="btn btn-primary" style={{alignSelf:"flex-end"}} onClick={addTeam}
+                disabled={!teamName.trim()}>
+                {t.teams.length?"+ Add Next Team":"+ Add Team"}
+              </button>
             </div>
-          ))}
+          )}
         </div>
       )}
 
