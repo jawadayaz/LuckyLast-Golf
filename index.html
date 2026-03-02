@@ -1077,28 +1077,31 @@ function TournamentPage({data,url,refresh}){
         const c=data.courses.find(x=>String(x.id)===String(t.courseId));
         const allDone=t.groups?.length&&t.groups.every(g=>t.lockedCards?.includes(g.id));
         return(
-          <div key={t.id} className="card">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div>
-                <div style={{fontFamily:"Playfair Display,serif",fontSize:17,fontWeight:700,color:"var(--green)"}}>
+          <div key={t.id} className="card" style={{padding:"14px 16px"}}>
+            {/* Row 1: name + status badge + del */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+              <div style={{flex:1,minWidth:0,marginRight:8}}>
+                <div style={{fontFamily:"Playfair Display,serif",fontSize:17,fontWeight:700,color:"var(--green)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
                   {t.name||"Unnamed Tournament"}
-                  {t.status==="scoring"&&!allDone&&<span style={{fontSize:12,fontWeight:400,color:"var(--red)",marginLeft:6}}>(In progress)</span>}
-                  {allDone&&<span style={{fontSize:12,fontWeight:400,color:"var(--green-mid)",marginLeft:6}}>(Completed)</span>}
                 </div>
-                <div style={{fontSize:12,color:"var(--gray-400)",marginTop:3}}>{c?.name||"No course"} · {t.groups?.length||0} groups · {t.teams?.length||0} teams · {t.pairs?.length||0} pairs</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                  {t.status==="scoring"&&!allDone&&<span style={{fontSize:11,fontWeight:600,color:"var(--red)",background:"#ffebee",borderRadius:4,padding:"1px 6px"}}>In progress</span>}
+                  {allDone&&<span style={{fontSize:11,fontWeight:600,color:"var(--green-mid)",background:"#e8f5e9",borderRadius:4,padding:"1px 6px"}}>Completed</span>}
+                  <span style={{fontSize:11,color:"var(--gray-400)"}}>{c?.name||"No course"} · {t.groups?.length||0}g · {t.pairs?.length||0} pairs</span>
+                </div>
               </div>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}>
-
-                <button className="btn btn-sm btn-ghost" onClick={()=>{setTid(t.id);setView("setup");}}>Setup</button>
-                {t.status==="scoring"&&!allDone&&(()=>{
-                  const hasAnyScore=!!(t.scores&&Object.values(t.scores).some(arr=>arr.some(v=>parseInt(v)>0)));
-                  return<button className="btn btn-sm btn-gold" onClick={()=>{setTid(t.id);setView("scoring");}}>▶ {hasAnyScore?"Resume Scoring":"Start Scoring"}</button>;
-                })()}
-                <button className="btn btn-sm btn-primary" onClick={()=>{setTid(t.id);setView(t.status==="setup"?"scoring":"results");}}>
-                  {t.status==="setup"?"Score":"Results"}
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={()=>setDelTourn(t.id)}>Del</button>
-              </div>
+              <button className="btn btn-sm btn-danger" style={{flexShrink:0}} onClick={()=>setDelTourn(t.id)}>Del</button>
+            </div>
+            {/* Row 2: action buttons */}
+            <div style={{display:"flex",gap:6,flexWrap:"nowrap",overflowX:"auto"}}>
+              <button className="btn btn-sm btn-ghost" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView("setup");}}>Setup</button>
+              {t.status==="scoring"&&!allDone&&(()=>{
+                const hasAnyScore=!!(t.scores&&Object.values(t.scores).some(arr=>arr.some(v=>parseInt(v)>0)));
+                return<button className="btn btn-sm btn-gold" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView("scoring");}}>▶ {hasAnyScore?"Resume Scoring":"Start Scoring"}</button>;
+              })()}
+              <button className="btn btn-sm btn-primary" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView(t.status==="setup"?"scoring":"results");}}>
+                {t.status==="setup"?"Score":"Results"}
+              </button>
             </div>
           </div>
         );
