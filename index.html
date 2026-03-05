@@ -154,6 +154,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--gray-8
 /* ── Tabs ── */
 .tabs{display:flex;gap:3px;background:var(--gray-100);padding:3px;border-radius:9px;margin-bottom:16px;flex-wrap:wrap;width:fit-content;}
 .tab{padding:6px 13px;border-radius:7px;cursor:pointer;font-size:12.5px;font-weight:500;color:var(--gray-600);transition:all .15s;white-space:nowrap;}
+.tab-warn{color:#b45309;}
 .tab.on{background:white;color:var(--green);font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.08);}
 
 /* ── Hole grid ── */
@@ -1249,6 +1250,12 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
     const inOther=t.groups.some(g=>g.id!==gid&&g.playerIds?.includes(pid));
     if(inOther&&!inThis)return N("Already in another group","error");
     if(!inThis&&(grp?.playerIds?.length||0)>=4)return N("Max 4 players per group","error");
+    if(isRyder&&!inThis){
+      const playerTeam=t.teams.find(tm=>(tm.playerIds||[]).includes(pid));
+      if(!playerTeam)return N("Assign this player to a team first","error");
+      const teamCountInGroup=(grp?.playerIds||[]).filter(p=>(playerTeam.playerIds||[]).includes(p)).length;
+      if(teamCountInGroup>=2)return N(`Already 2 players from ${playerTeam.name} in this group`,"error");
+    }
     updateT(t.id,x=>({...x,groups:x.groups.map(g=>g.id===gid?{...g,playerIds:inThis?g.playerIds.filter(i=>i!==pid):[...(g.playerIds||[]),pid]}:g)}));
   };
 
@@ -1257,8 +1264,15 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   const removePair=(pid)=>updateT(t.id,x=>({...x,pairs:x.pairs.filter(p=>p.id!==pid)}));
   const setPairF=(pid,k,v)=>updateT(t.id,x=>({...x,pairs:x.pairs.map(p=>p.id===pid?{...p,[k]:v}:p)}));
 
+  const isRyder=(t.teamFormat||"modSF")==="ryder";
+  const ryderTeamsReady=isRyder?t.teams.length>=2&&t.teams.every(tm=>(tm.playerIds||[]).length>=2):true;
   const validGroups=t.groups.filter(g=>g.playerIds?.length>0);
-  const canStart=t.name.trim()&&validGroups.length>0;
+  // Ryder: every group must have exactly 2 players from each team
+  const ryderGroupsValid=!isRyder||validGroups.every(g=>{
+    if(!g.playerIds?.length)return true;
+    return t.teams.every(tm=>(g.playerIds||[]).filter(pid=>(tm.playerIds||[]).includes(pid)).length===2);
+  });
+  const canStart=t.name.trim()&&validGroups.length>0&&(isRyder?ryderTeamsReady&&ryderGroupsValid:true);
 
   return(
     <div>
@@ -1266,18 +1280,28 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
         <div className="ph-left"><h2>{t.name||"New Tournament"}</h2><p>Tournament setup</p></div>
         <div style={{display:"flex",gap:7}}>
           <button className="btn btn-ghost" onClick={onBack}>← All</button>
-          <button className="btn btn-primary" onClick={()=>{if(!canStart)return N(t.name?"Add at least one group with players":"Enter tournament name","error");onStart();}}>Start Scoring →</button>
+          <button className="btn btn-primary" onClick={()=>{
+              if(!t.name.trim())return N("Enter tournament name","error");
+              if(isRyder&&!ryderTeamsReady)return N("Set up both teams with at least 2 players each first","error");
+              if(!validGroups.length)return N("Add at least one group with players","error");
+              if(isRyder&&!ryderGroupsValid)return N("Each group must have exactly 2 players from each team","error");
+              onStart();
+            }}>Start Scoring →</button>
         </div>
       </div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
 
+      {isRyder&&!ryderTeamsReady&&tab==="groups"&&(
+        <div className="alert alert-warn" style={{margin:"8px 0"}}>Set up both teams before creating groups.</div>
+      )}
       <div className="tabs">
         {[
           {id:"details",label:"Details"},
-          {id:"teams",label:`Teams (${t.teams.length})`},
+          isRyder?{id:"teams",label:`Teams (${t.teams.length})`,warn:!ryderTeamsReady}:null,
           {id:"groups",label:`Groups (${t.groups.length})`},
+          !isRyder?{id:"teams",label:`Teams (${t.teams.length})`}:null,
           {id:"pairs",label:`Ratha Ratha Pairs (${t.pairs.length})`},
-        ].map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")} onClick={()=>setTab(s.id)}>{s.label}</div>)}
+        ].filter(Boolean).map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")+(s.warn?" tab-warn":"")} onClick={()=>setTab(s.id)}>{s.label}{s.warn?" ⚠️":""}</div>)}
       </div>
 
       {tab==="details"&&(
@@ -1304,87 +1328,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
             {(t.teamFormat||"modSF")==="modSF"&&<span><strong>Modified Stableford:</strong> Each player's Modified Stableford (75% HC) score summed for team total.</span>}
             {t.teamFormat==="ryder"&&<span><strong>Ryder Cup:</strong> Head-to-head matchplay between teams. Assign one player from each team per match. Lower net score wins the hole — win = 1 pt, halve = ½ pt. Matches set up below.</span>}
           </div>
-          {t.teamFormat==="ryder"&&t.teams.length>=2&&(
-            <div style={{marginTop:14}}>
-              <div className="section-title">Ryder Cup Matches</div>
-              {(t.ryderMatches||[]).map((rp,i)=>{
-                const teamA=t.teams[0],teamB=t.teams[1];
-                const playersA=data.players.filter(p=>(teamA?.playerIds||[]).includes(p.id));
-                const playersB=data.players.filter(p=>(teamB?.playerIds||[]).includes(p.id));
-                const isDoubles=(rp.matchType||"singles")==="doubles";
-                const upd=(k,v)=>set("ryderMatches",(t.ryderMatches||[]).map((p,j)=>j===i?{...p,[k]:v}:p));
-                return(
-                  <div key={i} className="pair-card" style={{marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                      <span style={{fontWeight:700,fontSize:12,color:"var(--green)"}}>Match {i+1}</span>
-                      <div style={{display:"flex",gap:4,marginLeft:8}}>
-                        <button onClick={()=>upd("matchType","singles")} style={{padding:"3px 10px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:600,cursor:"pointer",background:(rp.matchType||"singles")==="singles"?"var(--green)":"white",color:(rp.matchType||"singles")==="singles"?"white":"var(--gray-600)",borderColor:(rp.matchType||"singles")==="singles"?"var(--green)":"var(--gray-200)"}}>Singles</button>
-                        <button onClick={()=>upd("matchType","doubles")} style={{padding:"3px 10px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:600,cursor:"pointer",background:isDoubles?"var(--green)":"white",color:isDoubles?"white":"var(--gray-600)",borderColor:isDoubles?"var(--green)":"var(--gray-200)"}}>Doubles</button>
-                      </div>
-                      <span style={{fontSize:10,color:"var(--gray-400)",marginLeft:4}}>{isDoubles?"75% HC · best ball":"Full HC"}</span>
-                      <button className="btn btn-danger btn-sm" style={{marginLeft:"auto"}} onClick={()=>set("ryderMatches",(t.ryderMatches||[]).filter((_,j)=>j!==i))}>Remove</button>
-                    </div>
-                    {!isDoubles?(
-                      <div className="fg fg2">
-                        <div className="ff">
-                          <label>{teamA?.name||"Team A"}</label>
-                          <select value={rp.p1Id||""} onChange={e=>upd("p1Id",e.target.value)}>
-                            <option value="">— Select player —</option>
-                            {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                          </select>
-                        </div>
-                        <div className="ff">
-                          <label>{teamB?.name||"Team B"}</label>
-                          <select value={rp.p2Id||""} onChange={e=>upd("p2Id",e.target.value)}>
-                            <option value="">— Select player —</option>
-                            {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    ):(
-                      <div>
-                        <div className="fg fg2" style={{marginBottom:6}}>
-                          <div className="ff">
-                            <label>{teamA?.name||"Team A"} — Player 1</label>
-                            <select value={rp.p1aId||""} onChange={e=>upd("p1aId",e.target.value)}>
-                              <option value="">— Select —</option>
-                              {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                            </select>
-                          </div>
-                          <div className="ff">
-                            <label>{teamB?.name||"Team B"} — Player 1</label>
-                            <select value={rp.p2aId||""} onChange={e=>upd("p2aId",e.target.value)}>
-                              <option value="">— Select —</option>
-                              {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                            </select>
-                          </div>
-                        </div>
-                        <div className="fg fg2">
-                          <div className="ff">
-                            <label>{teamA?.name||"Team A"} — Player 2</label>
-                            <select value={rp.p1bId||""} onChange={e=>upd("p1bId",e.target.value)}>
-                              <option value="">— Select —</option>
-                              {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                            </select>
-                          </div>
-                          <div className="ff">
-                            <label>{teamB?.name||"Team B"} — Player 2</label>
-                            <select value={rp.p2bId||""} onChange={e=>upd("p2bId",e.target.value)}>
-                              <option value="">— Select —</option>
-                              {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              <button className="btn btn-ghost btn-sm" onClick={()=>set("ryderMatches",[...(t.ryderMatches||[]),{matchType:"singles",p1Id:null,p2Id:null}])}>
-                + Add Match
-              </button>
-            </div>
-          )}
+
         </div>
       )}
 
@@ -1463,28 +1407,48 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
       {tab==="groups"&&(
         <div>
           <div className="card">
-            <div className="card-title">Playing Groups <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addGroup}>+ Add Group</button></div>
-            <Alrt type="info" msg="Each group creates one scorecard. Max 4 players per group. A player can only be in one group."/>
-            {!t.groups.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No groups yet.</p>}
+            <div className="card-title">Playing Groups <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addGroup} disabled={isRyder&&!ryderTeamsReady}>+ Add Group</button></div>
+            {isRyder
+              ?<Alrt type="info" msg={`Ryder Cup: each group must have exactly 2 players from ${t.teams[0]?.name||"Team A"} and 2 from ${t.teams[1]?.name||"Team B"}. Groups become doubles matches.`}/>
+              :<Alrt type="info" msg="Each group creates one scorecard. Max 4 players per group. A player can only be in one group."/>
+            }
+            {isRyder&&!ryderTeamsReady&&<div style={{padding:"10px 0",fontSize:13,color:"var(--gray-400)"}}>Set up both teams with at least 2 players each before creating groups.</div>}
+            {!t.groups.length&&ryderTeamsReady&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No groups yet.</p>}
             {t.groups.map((g,gi)=>{
               const gp=data.players.filter(p=>g.playerIds?.includes(p.id));
+              // Ryder: count per team, flag if invalid
+              const teamCounts=isRyder?t.teams.map(tm=>({team:tm,count:(g.playerIds||[]).filter(pid=>(tm.playerIds||[]).includes(pid)).length})):[];
+              const groupValid=!isRyder||teamCounts.every(tc=>tc.count===2);
+              const groupFull=!isRyder?(gp.length>=4):(teamCounts.every(tc=>tc.count>=2));
               return(
                 <div key={g.id} className="group-card">
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
-                    <div style={{fontWeight:700,fontSize:13,color:"var(--green)"}}>
-                      Group {gi+1} <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:12}}>— {gp.length?gp.map(p=>p.name).join(", "):"Empty"}</span>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--green)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      Group {gi+1}
+                      <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:12}}>— {gp.length?gp.map(p=>p.name).join(", "):"Empty"}</span>
+                      {isRyder&&teamCounts.map(tc=>(
+                        <span key={tc.team.id} className={"badge "+(tc.count===2?"b-green":tc.count>0?"b-gold":"b-gray")} style={{fontSize:10}}>
+                          {tc.team.name}: {tc.count}/2
+                        </span>
+                      ))}
+                      {isRyder&&gp.length===4&&!groupValid&&<span className="badge b-red" style={{fontSize:10}}>Invalid split</span>}
                     </div>
                     <button className="btn btn-sm btn-danger" onClick={()=>removeGroup(g.id)}>Remove</button>
                   </div>
                   <div className="psel">
-                    {data.players.map(p=>{
+                    {(isRyder?[...t.teams[0].playerIds,...t.teams[1].playerIds].map(pid=>data.players.find(p=>String(p.id)===String(pid))).filter(Boolean):data.players).map(p=>{
                       const inThis=g.playerIds?.includes(p.id);
                       const inOther=t.groups.some(x=>x.id!==g.id&&x.playerIds?.includes(p.id));
+                      const playerTeam=isRyder?t.teams.find(tm=>(tm.playerIds||[]).includes(p.id)):null;
+                      const teamCount=isRyder&&playerTeam?(g.playerIds||[]).filter(pid=>(playerTeam.playerIds||[]).includes(pid)).length:0;
+                      const teamFull=isRyder&&!inThis&&teamCount>=2;
                       return(
-                        <div key={p.id} className={"pchip"+(inThis?" on":inOther?" disabled":"")}
-                          onClick={()=>toggleGroupP(g.id,p.id)} title={inOther?"In another group":""}>
-                          <span>{inThis?"✓":inOther?"✗":"○"}</span>
-                          <span style={{flex:1}}>{p.name}</span><span className="hc">{p.handicap}</span>
+                        <div key={p.id} className={"pchip"+(inThis?" on":(inOther||teamFull)?" disabled":"")}
+                          onClick={()=>toggleGroupP(g.id,p.id)} title={inOther?"In another group":teamFull?`${playerTeam.name} already has 2 in this group`:""}>
+                          <span>{inThis?"✓":(inOther||teamFull)?"✗":"○"}</span>
+                          <span style={{flex:1}}>{p.name}</span>
+                          {isRyder&&playerTeam&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:inThis?"rgba(255,255,255,0.3)":"var(--gray-100)",color:inThis?"white":"var(--gray-600)",marginRight:2}}>{playerTeam.name}</span>}
+                          <span className="hc">{p.handicap}</span>
                         </div>
                       );
                     })}
@@ -1862,7 +1826,17 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
   const teamResults=useMemo(()=>{
     if(!t.teams?.length||!indivResults.length)return[];
     if((t.teamFormat||"modSF")==="ryder"){
-      const res=calcRyder(t.teams,t.ryderMatches||[],course,t.scores||{},allPlayers);
+      // Derive doubles matches from groups: each group = 1 doubles match (2 per team)
+      const teamA=t.teams[0],teamB=t.teams[1];
+      if(!teamA||!teamB)return[];
+      const derivedMatches=(t.groups||[]).filter(g=>(g.playerIds||[]).length===4).map((g,i)=>{
+        const aPlayers=(g.playerIds||[]).filter(pid=>(teamA.playerIds||[]).includes(pid));
+        const bPlayers=(g.playerIds||[]).filter(pid=>(teamB.playerIds||[]).includes(pid));
+        if(aPlayers.length!==2||bPlayers.length!==2)return null;
+        return{matchType:"doubles",p1aId:aPlayers[0],p1bId:aPlayers[1],p2aId:bPlayers[0],p2bId:bPlayers[1]};
+      }).filter(Boolean);
+      if(!derivedMatches.length)return[];
+      const res=calcRyder(t.teams,derivedMatches,course,t.scores||{},allPlayers);
       return res?[res]:[];
     }
     // Default: Modified Stableford
@@ -1872,7 +1846,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       return{team,members,total};
     }).sort((a,b)=>b.total-a.total);
   // eslint-disable-next-line
-  },[t.teams,t.teamFormat,t.ryderMatches,indivResults,JSON.stringify(t.scores)]);
+  },[t.teams,t.teamFormat,t.groups,indivResults,JSON.stringify(t.scores)]);
 
   const rankBy=(key,hi=true)=>[...indivResults].filter(r=>r.gross>0).sort((a,b)=>hi?b[key]-a[key]:a[key]-b[key]).map((r,i)=>({...r,pos:i+1}));
 
@@ -2361,6 +2335,16 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                       </div>
                     </div>
                   ))}
+                </div>
+              );
+            })()
+            :teamResults.map((r,i)=>(
+              <div key={r.team.id} className="card">
+                <div className="card-title">
+                  {i===0?"🏆 ":""}{r.team.name} — <span className="badge b-green">{r.total} pts</span>
+                  <span style={{fontSize:11,color:"var(--gray-400)",fontWeight:400,marginLeft:8}}>Modified Stableford (75% HC)</span>
+                </div>
+                {r.members.map(m=>(
                   <div key={m.playerId} className="lbrow">
                     <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.playerName}</div><div style={{fontSize:11,color:"var(--gray-400)"}}>HC {m.handicap}</div></div>
                     <div style={{fontWeight:700,color:"var(--green)",fontSize:14}}>{m.gross>0?m.modStableford:"—"} pts</div>
