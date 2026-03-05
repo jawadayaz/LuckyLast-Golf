@@ -1639,8 +1639,12 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
                   <>
                     <span className="badge b-red" style={{animation:"pulse 1.5s ease-in-out infinite"}}>⏳ In Progress</span>
                     <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View Only</button>
+                    <button className="btn btn-sm btn-gold" onClick={()=>{
+                      updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id]}));
+                      setActiveGid(g.id);
+                    }}>🎯 Take Over Scoring</button>
                     <button className="btn btn-sm btn-ghost" onClick={()=>{
-                      updateT(t.id,x=>({...x,scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id),lockedCards:[...(x.lockedCards||[]),g.id]}));
+                      updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id],lockedCards:[...(x.lockedCards||[]),g.id]}));
                       N("Card locked — scores preserved");
                     }}>🔒 Lock</button>
                   </>
@@ -1913,7 +1917,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                     {locked&&<span className="badge b-green" style={{marginLeft:8}}>🔒 Locked</span>}
                     {locked&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id),scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id)}));N("Card unlocked — scores preserved");}}> 🔓 Unlock</button>}
                     {!locked&&scoringNow&&<span className="badge b-red" style={{marginLeft:8}}>⏳ In Progress</span>}
-                    {!locked&&scoringNow&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id),lockedCards:[...(x.lockedCards||[]),g.id]}));N("Card locked — scores preserved");}}>🔒 Lock</button>}
+                    {!locked&&scoringNow&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id],lockedCards:[...(x.lockedCards||[]),g.id]}));N("Card locked — scores preserved");}}>🔒 Lock</button>}
                     {!locked&&!scoringNow&&!hasScores&&<span className="badge b-gray" style={{marginLeft:8}}>Pending</span>}
                   </div>
                   {hasScores?(
