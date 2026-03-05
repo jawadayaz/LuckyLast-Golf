@@ -375,6 +375,81 @@ function getStoredDiff(id1,id2){
   const d=getPairDiffs()[pairDiffKey(id1,id2)];
   return d||null;
 }
+function calcRyder(teams,ryderMatches,course,scores,players){
+  if(!teams||teams.length<2||!ryderMatches?.length)return null;
+  const teamA=teams[0],teamB=teams[1];
+  let ptsA=0,ptsB=0;
+  const matchDetails=ryderMatches.filter(rp=>{
+    if(rp.matchType==="doubles") return rp.p1aId&&rp.p1bId&&rp.p2aId&&rp.p2bId;
+    return rp.p1Id&&rp.p2Id;
+  }).map((rp,i)=>{
+    const isDoubles=rp.matchType==="doubles";
+    if(isDoubles){
+      // Doubles: each team has 2 players, best net score per hole used, 75% HC
+      const p1a=players.find(p=>String(p.id)===String(rp.p1aId));
+      const p1b=players.find(p=>String(p.id)===String(rp.p1bId));
+      const p2a=players.find(p=>String(p.id)===String(rp.p2aId));
+      const p2b=players.find(p=>String(p.id)===String(rp.p2bId));
+      if(!p1a||!p1b||!p2a||!p2b)return null;
+      const p1TeamA=(teamA.playerIds||[]).map(String).includes(String(p1a.id));
+      // 75% HC for doubles, then take best net score of each pair per hole
+      const hcp1a=Math.round(p1a.handicap*0.75),hcp1b=Math.round(p1b.handicap*0.75);
+      const hcp2a=Math.round(p2a.handicap*0.75),hcp2b=Math.round(p2b.handicap*0.75);
+      let mPtsA=0,mPtsB=0;
+      const holeDetail=course.holes.map((h,hi)=>{
+        const g1a=parseInt((scores[p1a.id]||[])[hi])||0;
+        const g1b=parseInt((scores[p1b.id]||[])[hi])||0;
+        const g2a=parseInt((scores[p2a.id]||[])[hi])||0;
+        const g2b=parseInt((scores[p2b.id]||[])[hi])||0;
+        if(!g1a||!g1b||!g2a||!g2b)return{hole:hi+1,g1a:g1a||null,g1b:g1b||null,g2a:g2a||null,g2b:g2b||null,result:null};
+        // Net scores at 75% HC
+        const net1a=g1a-sa(hcp1a,h.si),net1b=g1b-sa(hcp1b,h.si);
+        const net2a=g2a-sa(hcp2a,h.si),net2b=g2b-sa(hcp2b,h.si);
+        // Best ball: lowest net score of each pair
+        const bestA=Math.min(net1a,net1b),bestB=Math.min(net2a,net2b);
+        const holeWinnerA=p1TeamA?(bestA<bestB):(bestB<bestA);
+        const holeWinnerB=p1TeamA?(bestB<bestA):(bestA<bestB);
+        let holePtsA=0,holePtsB=0,result;
+        if(holeWinnerA){holePtsA=1;result="A";}
+        else if(holeWinnerB){holePtsB=1;result="B";}
+        else{holePtsA=0.5;holePtsB=0.5;result="H";}
+        mPtsA+=holePtsA;mPtsB+=holePtsB;
+        return{hole:hi+1,g1a,g1b,g2a,g2b,net1a,net1b,net2a,net2b,bestA,bestB,holePtsA,holePtsB,result};
+      });
+      const matchWinner=mPtsA>mPtsB?teamA:mPtsB>mPtsA?teamB:null;
+      ptsA+=mPtsA;ptsB+=mPtsB;
+      return{matchNum:i+1,isDoubles:true,p1a,p1b,p2a,p2b,p1TeamA,hcp1a,hcp1b,hcp2a,hcp2b,mPtsA,mPtsB,matchWinner,holeDetail};
+    }
+    // Singles: full HC, HC difference applied via stroke index
+    const p1=players.find(p=>String(p.id)===String(rp.p1Id));
+    const p2=players.find(p=>String(p.id)===String(rp.p2Id));
+    if(!p1||!p2)return null;
+    const p1TeamA=(teamA.playerIds||[]).map(String).includes(String(p1.id));
+    const hcp1=p1.handicap,hcp2=p2.handicap;
+    const hcpDiff=Math.round(Math.abs(hcp1-hcp2));
+    let mPtsA=0,mPtsB=0;
+    const holeDetail=course.holes.map((h,hi)=>{
+      const g1=parseInt((scores[p1.id]||[])[hi])||0;
+      const g2=parseInt((scores[p2.id]||[])[hi])||0;
+      if(!g1||!g2)return{hole:hi+1,g1:g1||null,g2:g2||null,result:null};
+      const allow1=hcp1>=hcp2?sa(hcpDiff,h.si):0;
+      const allow2=hcp2>hcp1?sa(hcpDiff,h.si):0;
+      const net1=g1-allow1,net2=g2-allow2;
+      const holeWinnerA=p1TeamA?(net1<net2):(net2<net1);
+      const holeWinnerB=p1TeamA?(net2<net1):(net1<net2);
+      let holePtsA=0,holePtsB=0,result;
+      if(holeWinnerA){holePtsA=1;result="A";}
+      else if(holeWinnerB){holePtsB=1;result="B";}
+      else{holePtsA=0.5;holePtsB=0.5;result="H";}
+      mPtsA+=holePtsA;mPtsB+=holePtsB;
+      return{hole:hi+1,g1,g2,allow1,allow2,net1,net2,holePtsA,holePtsB,result};
+    });
+    const matchWinner=mPtsA>mPtsB?teamA:mPtsB>mPtsA?teamB:null;
+    ptsA+=mPtsA;ptsB+=mPtsB;
+    return{matchNum:i+1,isDoubles:false,p1,p2,p1TeamA,hcpDiff,mPtsA,mPtsB,matchWinner,holeDetail};
+  }).filter(Boolean);
+  return{teamA,teamB,ptsA,ptsB,winner:ptsA>ptsB?teamA:ptsB>ptsA?teamB:null,matchDetails};
+}
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 function Alrt({type,msg,onClose}){
@@ -1067,7 +1142,7 @@ function TournamentPage({data,url,refresh}){
 
   const newT=()=>{
     const id=Date.now();
-    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],status:"setup"};
+    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],status:"setup"};
     saveTourns([...tourns,t]);
     setTid(id);setView("setup");
   };
@@ -1216,9 +1291,100 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
               </select>
             </div>
           </div>
-          <div style={{marginTop:16,padding:12,background:"var(--gray-50)",borderRadius:8,fontSize:12.5,color:"var(--gray-600)"}}>
-            <strong>How it works:</strong> Teams use Modified Stableford (75% HC). Groups become scorecards. Ratha Ratha pairs compete hole-by-hole.
+          <div style={{marginTop:12}} className="fg fg2">
+            <div className="ff">
+              <label>Team Scoring Format</label>
+              <select value={t.teamFormat||"modSF"} onChange={e=>set("teamFormat",e.target.value)}>
+                <option value="modSF">Modified Stableford (75% HC)</option>
+                <option value="ryder">Ryder Cup (Matchplay)</option>
+              </select>
+            </div>
           </div>
+          <div style={{marginTop:12,padding:10,background:"var(--gray-50)",borderRadius:8,fontSize:12,color:"var(--gray-600)",lineHeight:1.6}}>
+            {(t.teamFormat||"modSF")==="modSF"&&<span><strong>Modified Stableford:</strong> Each player's Modified Stableford (75% HC) score summed for team total.</span>}
+            {t.teamFormat==="ryder"&&<span><strong>Ryder Cup:</strong> Head-to-head matchplay between teams. Assign one player from each team per match. Lower net score wins the hole — win = 1 pt, halve = ½ pt. Matches set up below.</span>}
+          </div>
+          {t.teamFormat==="ryder"&&t.teams.length>=2&&(
+            <div style={{marginTop:14}}>
+              <div className="section-title">Ryder Cup Matches</div>
+              {(t.ryderMatches||[]).map((rp,i)=>{
+                const teamA=t.teams[0],teamB=t.teams[1];
+                const playersA=data.players.filter(p=>(teamA?.playerIds||[]).includes(p.id));
+                const playersB=data.players.filter(p=>(teamB?.playerIds||[]).includes(p.id));
+                const isDoubles=(rp.matchType||"singles")==="doubles";
+                const upd=(k,v)=>set("ryderMatches",(t.ryderMatches||[]).map((p,j)=>j===i?{...p,[k]:v}:p));
+                return(
+                  <div key={i} className="pair-card" style={{marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontWeight:700,fontSize:12,color:"var(--green)"}}>Match {i+1}</span>
+                      <div style={{display:"flex",gap:4,marginLeft:8}}>
+                        <button onClick={()=>upd("matchType","singles")} style={{padding:"3px 10px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:600,cursor:"pointer",background:(rp.matchType||"singles")==="singles"?"var(--green)":"white",color:(rp.matchType||"singles")==="singles"?"white":"var(--gray-600)",borderColor:(rp.matchType||"singles")==="singles"?"var(--green)":"var(--gray-200)"}}>Singles</button>
+                        <button onClick={()=>upd("matchType","doubles")} style={{padding:"3px 10px",borderRadius:6,border:"1.5px solid",fontSize:11,fontWeight:600,cursor:"pointer",background:isDoubles?"var(--green)":"white",color:isDoubles?"white":"var(--gray-600)",borderColor:isDoubles?"var(--green)":"var(--gray-200)"}}>Doubles</button>
+                      </div>
+                      <span style={{fontSize:10,color:"var(--gray-400)",marginLeft:4}}>{isDoubles?"75% HC · best ball":"Full HC"}</span>
+                      <button className="btn btn-danger btn-sm" style={{marginLeft:"auto"}} onClick={()=>set("ryderMatches",(t.ryderMatches||[]).filter((_,j)=>j!==i))}>Remove</button>
+                    </div>
+                    {!isDoubles?(
+                      <div className="fg fg2">
+                        <div className="ff">
+                          <label>{teamA?.name||"Team A"}</label>
+                          <select value={rp.p1Id||""} onChange={e=>upd("p1Id",e.target.value)}>
+                            <option value="">— Select player —</option>
+                            {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                          </select>
+                        </div>
+                        <div className="ff">
+                          <label>{teamB?.name||"Team B"}</label>
+                          <select value={rp.p2Id||""} onChange={e=>upd("p2Id",e.target.value)}>
+                            <option value="">— Select player —</option>
+                            {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    ):(
+                      <div>
+                        <div className="fg fg2" style={{marginBottom:6}}>
+                          <div className="ff">
+                            <label>{teamA?.name||"Team A"} — Player 1</label>
+                            <select value={rp.p1aId||""} onChange={e=>upd("p1aId",e.target.value)}>
+                              <option value="">— Select —</option>
+                              {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                            </select>
+                          </div>
+                          <div className="ff">
+                            <label>{teamB?.name||"Team B"} — Player 1</label>
+                            <select value={rp.p2aId||""} onChange={e=>upd("p2aId",e.target.value)}>
+                              <option value="">— Select —</option>
+                              {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                            </select>
+                          </div>
+                        </div>
+                        <div className="fg fg2">
+                          <div className="ff">
+                            <label>{teamA?.name||"Team A"} — Player 2</label>
+                            <select value={rp.p1bId||""} onChange={e=>upd("p1bId",e.target.value)}>
+                              <option value="">— Select —</option>
+                              {playersA.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                            </select>
+                          </div>
+                          <div className="ff">
+                            <label>{teamB?.name||"Team B"} — Player 2</label>
+                            <select value={rp.p2bId||""} onChange={e=>upd("p2bId",e.target.value)}>
+                              <option value="">— Select —</option>
+                              {playersB.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              <button className="btn btn-ghost btn-sm" onClick={()=>set("ryderMatches",[...(t.ryderMatches||[]),{matchType:"singles",p1Id:null,p2Id:null}])}>
+                + Add Match
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1695,12 +1861,18 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
 
   const teamResults=useMemo(()=>{
     if(!t.teams?.length||!indivResults.length)return[];
+    if((t.teamFormat||"modSF")==="ryder"){
+      const res=calcRyder(t.teams,t.ryderMatches||[],course,t.scores||{},allPlayers);
+      return res?[res]:[];
+    }
+    // Default: Modified Stableford
     return t.teams.map(team=>{
-      const members=indivResults.filter(r=>team.playerIds?.includes(r.playerId));
+      const members=indivResults.filter(r=>(team.playerIds||[]).includes(r.playerId));
       const total=members.reduce((a,r)=>a+(r.gross>0?r.modStableford:0),0);
       return{team,members,total};
     }).sort((a,b)=>b.total-a.total);
-  },[t.teams,indivResults]);
+  // eslint-disable-next-line
+  },[t.teams,t.teamFormat,t.ryderMatches,indivResults,JSON.stringify(t.scores)]);
 
   const rankBy=(key,hi=true)=>[...indivResults].filter(r=>r.gross>0).sort((a,b)=>hi?b[key]-a[key]:a[key]-b[key]).map((r,i)=>({...r,pos:i+1}));
 
@@ -1839,8 +2011,28 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       lines.push(``);
     }
     if(teamResults.length){
-      lines.push("*👥 Teams (Mod Stableford):*");
-      teamResults.forEach((r,i)=>lines.push(`  ${i+1}. ${r.team.name} — ${r.total} pts`));
+      if((t.teamFormat||"modSF")==="ryder"&&teamResults[0]){
+        const rc=teamResults[0];
+        lines.push("*🏆 Ryder Cup:*");
+        const toWin=Math.floor(rc.matchDetails.length/2)+0.5;
+        lines.push(`  ${rc.teamA.name} ${rc.ptsA} – ${rc.ptsB} ${rc.teamB.name}  (win target: ${toWin})`);
+        if(rc.winner) lines.push(`  🏆 ${rc.winner.name} win!`);
+        else lines.push(`  ${rc.ptsA===rc.ptsB?"All Square":rc.ptsA>rc.ptsB?rc.teamA.name:rc.teamB.name+" leading"}`);
+        lines.push(``);
+        lines.push("  *Match results:*");
+        rc.matchDetails.forEach(m=>{
+          const diff=Math.abs(m.mPtsA-m.mPtsB);
+          const upTeam=m.mPtsA>m.mPtsB?rc.teamA.name:m.mPtsB>m.mPtsA?rc.teamB.name:null;
+          const status=upTeam?`${upTeam} ${diff%1===0?diff:diff.toFixed(1)} up`:"All Square";
+          const matchType=m.isDoubles?"Doubles":"Singles";
+          const players=m.isDoubles?`${m.p1a.name} & ${m.p1b.name} vs ${m.p2a.name} & ${m.p2b.name}`:`${m.p1.name} vs ${m.p2.name}`;
+          lines.push(`  Match ${m.matchNum} (${matchType}): ${players}`);
+          lines.push(`    ${status}`);
+        });
+      } else {
+        lines.push("*👥 Teams (Mod Stableford):*");
+        teamResults.forEach((r,i)=>lines.push(`  ${i+1}. ${r.team.name} — ${r.total} pts`));
+      }
     }
     window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`,"_blank");
   };
@@ -1849,7 +2041,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
     {id:"individual",label:"All Players"},
     {id:"scorecards",label:`Scorecards (${t.groups?.length||0})`},
     {id:"pairs",label:`Ratha Ratha (${pairResults.length} pairs)`},
-    t.teams?.length&&{id:"teams",label:`Teams (${teamResults.length})`},
+    t.teams?.length&&{id:"teams",label:"Teams"},
   ].filter(Boolean);
 
   return(
@@ -2053,14 +2245,122 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       {tab==="teams"&&(
         <div>
           {!teamResults.length
-            ?<div className="card"><p style={{fontSize:13,color:"var(--gray-400)"}}>No teams set up.</p></div>
-            :teamResults.map((r,i)=>(
-              <div key={r.team.id} className="card">
-                <div className="card-title">
-                  {i===0?"🏆 ":""}{r.team.name} — <span className="badge b-green">{r.total} pts</span>
-                  <span style={{fontSize:11,color:"var(--gray-400)",fontWeight:400,marginLeft:8}}>Modified Stableford (75% HC)</span>
-                </div>
-                {r.members.map(m=>(
+            ?<div className="card"><p style={{fontSize:13,color:"var(--gray-400)"}}>No teams set up, or Ryder Cup matches not yet configured.</p></div>
+            :(t.teamFormat||"modSF")==="ryder"&&teamResults[0]?(()=>{
+              const r=teamResults[0];
+              const totalMatches=r.matchDetails.length;
+              const toWin=Math.floor(totalMatches/2)+0.5;
+              return(
+                <div>
+                  {/* Scoreboard */}
+                  <div className="card">
+                    <div className="card-title">🏆 Ryder Cup — Matchplay</div>
+                    <div style={{display:"flex",gap:16,justifyContent:"center",alignItems:"center",padding:"16px 0 10px",flexWrap:"wrap"}}>
+                      <div style={{textAlign:"center",flex:1,minWidth:100}}>
+                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:r.ptsA>=r.ptsB?"var(--green)":"var(--gray-400)"}}>{r.teamA.name}</div>
+                        <div style={{fontSize:40,fontWeight:800,lineHeight:1.1,color:r.ptsA>=r.ptsB?"var(--green)":"var(--gray-400)"}}>{r.ptsA}</div>
+                        <div style={{fontSize:11,color:"var(--gray-400)"}}>points</div>
+                      </div>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:12,color:"var(--gray-400)",fontWeight:600}}>Win target</div>
+                        <div style={{fontSize:22,fontWeight:800,color:"var(--gold)"}}>{toWin}</div>
+                      </div>
+                      <div style={{textAlign:"center",flex:1,minWidth:100}}>
+                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:r.ptsB>r.ptsA?"var(--green)":"var(--gray-400)"}}>{r.teamB.name}</div>
+                        <div style={{fontSize:40,fontWeight:800,lineHeight:1.1,color:r.ptsB>r.ptsA?"var(--green)":"var(--gray-400)"}}>{r.ptsB}</div>
+                        <div style={{fontSize:11,color:"var(--gray-400)"}}>points</div>
+                      </div>
+                    </div>
+                    {r.winner
+                      ?<div style={{textAlign:"center",fontWeight:700,color:"var(--green)",fontSize:14,paddingBottom:8}}>🏆 {r.winner.name} wins {r.ptsA} – {r.ptsB}</div>
+                      :<div style={{textAlign:"center",color:"var(--gray-400)",fontSize:13,paddingBottom:8}}>{r.ptsA===r.ptsB?"All Square":r.ptsA>r.ptsB?r.teamA.name:r.teamB.name+" leading"}</div>
+                    }
+                    {/* Match summary rows */}
+                    <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:8}}>
+                      {r.matchDetails.map((m,i)=>{
+                        const holesPlayed=m.holeDetail.filter(h=>h.result!==null).length;
+                        const diff=Math.abs(m.mPtsA-m.mPtsB);
+                        const upTeam=m.mPtsA>m.mPtsB?r.teamA.name:m.mPtsB>m.mPtsA?r.teamB.name:null;
+                        const statusLabel=upTeam?`${upTeam} ${diff%1===0?diff:diff.toFixed(1)} up`:"All Square";
+                        const statusColour=m.mPtsA>m.mPtsB?"b-green":m.mPtsB>m.mPtsA?"b-red":"b-gray";
+                        const matchLabel=m.isDoubles?`${m.p1a.name} & ${m.p1b.name} vs ${m.p2a.name} & ${m.p2b.name}`:`${m.p1.name} vs ${m.p2.name}`;
+                        const matchType=m.isDoubles?"👥 Doubles":"Singles";
+                        return(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 2px",borderBottom:i<r.matchDetails.length-1?"1px solid var(--gray-100)":"none",flexWrap:"wrap"}}>
+                            <span style={{fontSize:11,fontWeight:700,color:"var(--gray-400)",width:56,flexShrink:0}}>Match {m.matchNum}</span>
+                            <span style={{flex:1,fontSize:12,fontWeight:600}}>{matchLabel}</span>
+                            <span style={{fontSize:10,color:"var(--gray-400)"}}>{matchType} · {holesPlayed} holes</span>
+                            <span className={"badge "+statusColour} style={{minWidth:100,justifyContent:"center"}}>{statusLabel}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Per-match detail cards */}
+                  {r.matchDetails.map((m,i)=>(
+                    <div key={i} className="card">
+                      <div className="card-title" style={{fontSize:13,flexWrap:"wrap",gap:6}}>
+                        <span>Match {m.matchNum}{m.isDoubles?" 👥 Doubles":" Singles"}: {m.isDoubles?`${m.p1a.name} & ${m.p1b.name}`:`${m.p1.name}`} <span style={{color:"var(--gray-400)",fontSize:11,fontWeight:400}}>({r.teamA.name})</span> vs {m.isDoubles?`${m.p2a.name} & ${m.p2b.name}`:`${m.p2.name}`} <span style={{color:"var(--gray-400)",fontSize:11,fontWeight:400}}>({r.teamB.name})</span></span>
+                        {m.isDoubles?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)"}}>75% HC · best net score counts per hole</span>:m.hcpDiff>0&&<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)"}}>Full HC · +{m.hcpDiff} strokes to {m.p1.handicap>m.p2.handicap?m.p1.name:m.p2.name}</span>}
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        {m.isDoubles?(
+                          <table className="sct" style={{minWidth:560,fontSize:11}}>
+                            <thead><tr>
+                              <th style={{minWidth:95,textAlign:"left",paddingLeft:8}}>Player</th>
+                              {m.holeDetail.map(h=><th key={h.hole}>{h.hole}</th>)}
+                              <th style={{background:"#144024"}}>Pts</th>
+                            </tr></thead>
+                            <tbody>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1a.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1a.handicap} (75%={m.hcp1a}) · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net1a!==undefined&&h.net1a<=h.net1b?1:0.45}}>{h.g1a||"—"}</td>)}
+                                <td rowSpan={2} style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)",verticalAlign:"middle"}}>{m.p1TeamA?m.mPtsA:m.mPtsB}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1b.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1b.handicap} (75%={m.hcp1b}) · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net1b!==undefined&&h.net1b<h.net1a?1:0.45}}>{h.g1b||"—"}</td>)}
+                              </tr>
+                              <tr style={{borderTop:"2px solid var(--gray-200)"}}>
+                                <td style={{fontWeight:600}}>{m.p2a.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2a.handicap} (75%={m.hcp2a}) · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net2a!==undefined&&h.net2a<=h.net2b?1:0.45}}>{h.g2a||"—"}</td>)}
+                                <td rowSpan={2} style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)",verticalAlign:"middle"}}>{m.p1TeamA?m.mPtsB:m.mPtsA}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p2b.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2b.handicap} (75%={m.hcp2b}) · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net2b!==undefined&&h.net2b<h.net2a?1:0.45}}>{h.g2b||"—"}</td>)}
+                              </tr>
+                            </tbody>
+                          </table>
+                        ):(
+                          <table className="sct" style={{minWidth:560,fontSize:11}}>
+                            <thead><tr>
+                              <th style={{minWidth:95,textAlign:"left",paddingLeft:8}}>Player</th>
+                              {m.holeDetail.map(h=><th key={h.hole}>{h.hole}</th>)}
+                              <th style={{background:"#144024"}}>Pts</th>
+                            </tr></thead>
+                            <tbody>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1.handicap} · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="B"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g1||"—"}</td>)}
+                                <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsA:m.mPtsB}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p2.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2.handicap} · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g2||"—"}</td>)}
+                                <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsB:m.mPtsA}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                      <div style={{fontSize:10.5,color:"var(--gray-400)",marginTop:5,display:"flex",gap:14,flexWrap:"wrap"}}>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,background:"#e8f5e9",border:"1px solid #c8e6c9",borderRadius:2,display:"inline-block"}}></span>Hole won</span>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,background:"#fffde7",border:"1px solid #fff9c4",borderRadius:2,display:"inline-block"}}></span>Halved</span>
+                        {m.isDoubles&&<span>Faded = partner score counted</span>}
+                      </div>
+                    </div>
+                  ))}
                   <div key={m.playerId} className="lbrow">
                     <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.playerName}</div><div style={{fontSize:11,color:"var(--gray-400)"}}>HC {m.handicap}</div></div>
                     <div style={{fontWeight:700,color:"var(--green)",fontSize:14}}>{m.gross>0?m.modStableford:"—"} pts</div>
