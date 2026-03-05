@@ -1434,7 +1434,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
       }
       updateT(t.id,x=>({...x,
         lockedCards:[...(x.lockedCards||[]),gid],
-        scoringCards:(x.scoringCards||[]).filter(id=>id!==gid)
+        scoringCards:[...(x.scoringCards||[]).filter(id=>id!==gid),gid]
       }));
       // Update pair HC differentials based on Stableford winner
       (t.pairs||[]).forEach(pair=>{
@@ -1548,12 +1548,10 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
           <div className="card-title">{course.name} — Group Scorecard</div>
           <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={setScore} locked={false}/>
           <div className="btn-row" style={{marginTop:12}}>
-            <button className="btn btn-gold" onClick={()=>finishCard(g.id)} disabled={saving}>
-              {saving?<><Spin/>Saving…</>:"✓ Finish Round & Lock Card"}
-            </button>
-            <button className="btn btn-ghost" onClick={()=>saveAndExit(g.id)}>Save & Exit</button>
+            <button className="btn btn-primary" onClick={()=>saveAndExit(g.id)}>{saving?<><Spin/>Saving…</>:"← Save & Exit"}</button>
             <button className="btn btn-danger btn-sm" onClick={()=>discardCard(g.id)}>🗑 Discard</button>
           </div>
+          <div style={{fontSize:11.5,color:"var(--gray-400)",marginTop:6}}>To lock this card, return to the Groups view and click 🔒 Lock.</div>
         </div>
         {players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0))&&(
           <div className="card">
@@ -1614,6 +1612,9 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
                 <div style={{fontSize:12.5,color:"var(--gray-600)",marginTop:3}}>
                   {players.length?players.map(p=>`${p.name} (HC ${p.handicap})`).join(" · "):"Empty group"}
                 </div>
+                {locked&&(
+                  <div style={{fontSize:11,color:"#2e7d32",marginTop:3,fontWeight:700}}>🔒 Locked — view only</div>
+                )}
                 {!locked&&scoringNow&&(
                   <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4}}>
                     <span className="live-dot" style={{width:7,height:7}}/>
@@ -1627,17 +1628,21 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
               <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
                 {locked?(
                   <>
-                    <span className="badge b-green">✓ Complete</span>
+                    <span className="badge b-green">🔒 Locked</span>
                     <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View</button>
                     <button className="btn btn-sm btn-ghost" onClick={()=>{
-                      updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id)}));
+                      updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id),scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id)}));
                       N("Card unlocked — scores preserved");
-                    }}>Unlock</button>
+                    }}>🔓 Unlock</button>
                   </>
                 ):scoringNow?(
                   <>
                     <span className="badge b-red" style={{animation:"pulse 1.5s ease-in-out infinite"}}>⏳ In Progress</span>
                     <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View Only</button>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>{
+                      updateT(t.id,x=>({...x,scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id),lockedCards:[...(x.lockedCards||[]),g.id]}));
+                      N("Card locked — scores preserved");
+                    }}>🔒 Lock</button>
                   </>
                 ):(
                   <button className="btn btn-primary" onClick={()=>startScoring(g.id)}>{hasPartialScores?"▶ Resume Scoring":"▶ Start Scoring"}</button>
@@ -1905,9 +1910,10 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                 <div key={g.id} className="card">
                   <div className="card-title" style={{alignItems:"center",gap:9}}>
                     <span>Group {gi+1}: {players.map(p=>p.name).join(", ")||"Empty"}</span>
-                    {locked&&<span className="badge b-green" style={{marginLeft:8}}>✓ Complete</span>}
-                    {locked&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id)}));N("Card unlocked — scores preserved");}}> 🔓 Unlock</button>}
+                    {locked&&<span className="badge b-green" style={{marginLeft:8}}>🔒 Locked</span>}
+                    {locked&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id),scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id)}));N("Card unlocked — scores preserved");}}> 🔓 Unlock</button>}
                     {!locked&&scoringNow&&<span className="badge b-red" style={{marginLeft:8}}>⏳ In Progress</span>}
+                    {!locked&&scoringNow&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id),lockedCards:[...(x.lockedCards||[]),g.id]}));N("Card locked — scores preserved");}}>🔒 Lock</button>}
                     {!locked&&!scoringNow&&!hasScores&&<span className="badge b-gray" style={{marginLeft:8}}>Pending</span>}
                   </div>
                   {hasScores?(
