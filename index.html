@@ -574,7 +574,7 @@ const GAS=`// Lucky Last Golfers — Google Apps Script
 // Web app | Execute as: Me | Who has access: Anyone
 
 function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
-function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
+function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="searchCourses")return cr(searchCourses({name:e.parameter.name||"",location:e.parameter.location||""}),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
 function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
 if(p.action==="saveTournaments")return cr(saveTournaments(p.data));
 if(p.action==="searchCourses")return cr(searchCourses(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
@@ -973,7 +973,8 @@ function CoursesPage({data,url,refresh,setData}){
     if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
     setSearchBusy(true);setSearchResults(null);
     try{
-      const res=await apiPost(url,"searchCourses",{name:name.trim(),location:(location||"").trim()});
+      const action="searchCourses&name="+encodeURIComponent(name.trim())+"&location="+encodeURIComponent((location||"").trim());
+      const res=await jsonpGet(url,action);
       if(res.error){N("Search error: "+res.error,"error");}
       else{
         setSearchResults(res.courses||[]);
@@ -1149,14 +1150,13 @@ function CoursesPage({data,url,refresh,setData}){
               </button>
             </div>
           </div>
-          <div className="fg fg2" style={{marginBottom:8}}>
-            <div className="ff">
-              <label>Course Name {searchBusy&&<Spin/>}</label>
-              <input value={form.name} onChange={e=>onNameInput(e.target.value)} placeholder="Start typing to search…" autoComplete="off"/>
-            </div>
-            <div className="ff"><label>Location <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:10}}>(optional, helps narrow search)</span></label>
-              <input value={form.location} onChange={e=>{setForm({...form,location:e.target.value});locationRef.current=e.target.value;}} placeholder="City, Country"/>
-            </div>
+          <div style={{marginBottom:8}}>
+            <label style={{fontSize:11,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px",display:"block",marginBottom:4}}>
+              Course Name {searchBusy&&<Spin/>}
+            </label>
+            <input value={form.name} onChange={e=>onNameInput(e.target.value)}
+              placeholder={url?"Start typing to search…":"Enter course name"}
+              autoComplete="off" style={{width:"100%"}}/>
           </div>
           {!url&&<div style={{marginBottom:10,fontSize:11,color:"var(--gray-400)"}}>Connect to Google Sheets to enable live search.</div>}
           {searchResults&&searchResults.length>0&&(
