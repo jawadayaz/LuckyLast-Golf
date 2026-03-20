@@ -604,6 +604,15 @@ function getScorecardResult(token){
   if(!val)return{error:"Result not ready — try waiting a few more seconds and refreshing"};
   try{return JSON.parse(val);}catch(e){return{error:"Parse error: "+e};}
 }
+function testFetch(){
+  var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
+  Logger.log("key: "+key);
+  var res=UrlFetchApp.fetch("https://api.golfcourseapi.com/v1/search?search_query=prestige",{
+    method:"get",headers:{"Authorization":"Key "+key},muteHttpExceptions:true
+  });
+  Logger.log("status: "+res.getResponseCode());
+  Logger.log("body: "+res.getContentText().slice(0,200));
+}
 function searchCourses(d){
   Logger.log("searchCourses d="+JSON.stringify(d));
   var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
