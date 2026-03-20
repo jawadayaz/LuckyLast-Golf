@@ -336,33 +336,40 @@ function calcFormats(players,course){
 }
 function calcPair(pair,course,scores){
   const p1=pair.p1,p2=pair.p2;
-  const hcp1=pair.hcp1!=null?parseFloat(pair.hcp1):p1.handicap;
-  const hcp2=pair.hcp2!=null?parseFloat(pair.hcp2):p2.handicap;
-  const hcpDiff=Math.round(Math.abs(hcp1-hcp2));
+  // New model: diff + higherPId. Fallback: derive from hcp1/hcp2 for legacy data.
+  let hcpDiff,p1Higher;
+  if(pair.diff!=null){
+    hcpDiff=Math.round(pair.diff);
+    p1Higher=String(pair.higherPId)===String(p1.id);
+  } else {
+    const hcp1=pair.hcp1!=null?parseFloat(pair.hcp1):p1.handicap;
+    const hcp2=pair.hcp2!=null?parseFloat(pair.hcp2):p2.handicap;
+    hcpDiff=Math.round(Math.abs(hcp1-hcp2));
+    p1Higher=hcp1>=hcp2;
+  }
   let pts1=0,pts2=0,mnet1=0,mnet2=0;
   let holesPlayed=0,p1Holes=0,p2Holes=0;
   const holes=course.holes.map((h,i)=>{
     const g1=parseInt((scores[p1.id]||[])[i])||0;
     const g2=parseInt((scores[p2.id]||[])[i])||0;
-    if(g1){p1Holes++;mnet1+=Math.min(g1-sa(hcp1,h.si),h.par+3);}
-    if(g2){p2Holes++;mnet2+=Math.min(g2-sa(hcp2,h.si),h.par+3);}
+    if(g1){p1Holes++;mnet1+=Math.min(g1-sa(p1Higher?hcpDiff:0,h.si),h.par+3);}
+    if(g2){p2Holes++;mnet2+=Math.min(g2-sa(p1Higher?0:hcpDiff,h.si),h.par+3);}
     if(!g1||!g2)return{hole:i+1,si:h.si,par:h.par,g1:g1||null,g2:g2||null,allow:null,sf1:null,sf2:null,holeDiff:null,net1:null,net2:null};
     holesPlayed++;
-    const allow1=hcp1>=hcp2?sa(hcpDiff,h.si):0;
-    const allow2=hcp2>hcp1?sa(hcpDiff,h.si):0;
+    const allow1=p1Higher?sa(hcpDiff,h.si):0;
+    const allow2=p1Higher?0:sa(hcpDiff,h.si);
     const sf1=sfPts(g1,h.par,allow1);
     const sf2=sfPts(g2,h.par,allow2);
     const holeDiff=sf1-sf2;
     if(sf1>sf2)pts1+=sf1;
     else if(sf2>sf1)pts2+=sf2;
-    // net strokes using HC diff allowance, capped at par+3 (net triple bogey)
     const net1=Math.min(g1-allow1,h.par+3);
     const net2=Math.min(g2-allow2,h.par+3);
-    const allow=hcp1>=hcp2?allow1:allow2;
+    const allow=p1Higher?allow1:allow2;
     return{hole:i+1,si:h.si,par:h.par,g1,g2,allow,sf1,sf2,holeDiff,net1,net2};
   });
   const mnetDiff=mnet1-mnet2;
-  return{p1,p2,hcp1,hcp2,hcpDiff,pts1,pts2,mnet1,mnet2,mnetDiff,holesPlayed,p1Holes,p2Holes,holes,winner:pts1>pts2?p1:pts2>pts1?p2:null};
+  return{p1,p2,hcpDiff,p1Higher,pts1,pts2,mnet1,mnet2,mnetDiff,holesPlayed,p1Holes,p2Holes,holes,winner:pts1>pts2?p1:pts2>pts1?p2:null};
 }
 // Pair differential helpers — keyed by sorted player IDs "idA:idB"
 function pairDiffKey(id1,id2){return[String(id1),String(id2)].sort().join(":");}
@@ -460,7 +467,7 @@ function Alrt({type,msg,onClose}){
 }
 function Spin({dark}){return <span className={"spinner"+(dark?" spinner-dark":"")}/>;}
 
-function ScorecardGrid({course,players,scores,setScore,locked}){
+function ScorecardGrid({course,players,scores,setScore,locked,showMsf}){
   const cls=(g,p)=>{if(!g||!p)return"";const d=parseInt(g)-p;return d<=-2?"eagle":d===-1?"birdie":d===0?"par":d===1?"bogey":d===2?"double":"triple";};
   const t9=(pid,s)=>(scores[pid]||[]).slice(s,s+9).reduce((a,v)=>a+(parseInt(v)||0),0);
   if(!players.length)return null;
@@ -474,6 +481,7 @@ function ScorecardGrid({course,players,scores,setScore,locked}){
           {course.holes.slice(9).map((_,i)=><th key={i}>{i+10}</th>)}
           <th style={{background:"#0d3020"}}>IN</th>
           <th style={{background:"#0d3020"}}>TOT</th>
+          {showMsf&&<th style={{background:"#082010",color:"#a8ffc4"}}>Mod SF</th>}
         </tr></thead>
         <tbody>
           <tr className="pr">
@@ -483,18 +491,21 @@ function ScorecardGrid({course,players,scores,setScore,locked}){
             {course.holes.slice(9).map((h,i)=><td key={i}>{h.par}</td>)}
             <td>{course.holes.slice(9).reduce((a,h)=>a+h.par,0)}</td>
             <td>{course.par}</td>
+            {showMsf&&<td style={{background:"#082010"}}></td>}
           </tr>
           <tr className="sr">
             <td style={{textAlign:"left",paddingLeft:9}}>SI</td>
             {course.holes.slice(0,9).map((h,i)=><td key={i}>{h.si}</td>)}
             <td style={{color:"var(--gray-400)"}}>—</td>
             {course.holes.slice(9).map((h,i)=><td key={i}>{h.si}</td>)}
-            <td colSpan={2} style={{color:"var(--gray-400)"}}>—</td>
+            <td colSpan={showMsf?3:2} style={{color:"var(--gray-400)"}}>—</td>
           </tr>
           {players.map(p=>{
             const ps=scores[p.id]||Array(18).fill("");
             const al=course.holes.map(h=>sa(p.handicap,h.si));
             const tot=ps.reduce((a,v)=>a+(parseInt(v)||0),0);
+            const hc75=Math.round(p.handicap*0.75);
+            const msf=showMsf?course.holes.reduce((acc,h,i)=>{const g=parseInt(ps[i])||0;if(!g)return acc;return acc+sfPts(g,h.par,sa(hc75,h.si));},0):null;
             return <tr key={p.id}>
               <td style={{textAlign:"left",paddingLeft:9}}>
                 <div style={{fontWeight:700,fontSize:12}}>{p.name}</div>
@@ -519,6 +530,7 @@ function ScorecardGrid({course,players,scores,setScore,locked}){
               ))}
               <td style={{fontWeight:800,color:"var(--green)",fontSize:12}}>{t9(p.id,9)||"—"}</td>
               <td style={{fontWeight:800,color:"var(--green)",fontSize:13}}>{tot||"—"}</td>
+              {showMsf&&<td style={{fontWeight:800,color:"#52b788",fontSize:12,background:"rgba(10,42,26,.15)"}}>{msf||"—"}</td>}
             </tr>;
           })}
         </tbody>
@@ -1260,7 +1272,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   };
 
   // ── Pairs ──
-  const addPair=()=>updateT(t.id,x=>({...x,pairs:[...x.pairs,{id:Date.now(),p1Id:null,p2Id:null,hcp1:null,hcp2:null}]}));
+  const addPair=()=>updateT(t.id,x=>({...x,pairs:[...x.pairs,{id:Date.now(),p1Id:null,p2Id:null,diff:null,higherPId:null}]}));
   const removePair=(pid)=>updateT(t.id,x=>({...x,pairs:x.pairs.filter(p=>p.id!==pid)}));
   const setPairF=(pid,k,v)=>updateT(t.id,x=>({...x,pairs:x.pairs.map(p=>p.id===pid?{...p,[k]:v}:p)}));
 
@@ -1463,63 +1475,71 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
       {tab==="pairs"&&(
         <div className="card">
           <div className="card-title">Ratha Ratha Pairs <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addPair}>+ Add Pair</button></div>
-          <Alrt type="info" msg="A player can be in multiple pairs. Override HC per pair — used only for Ratha Ratha scoring."/>
+          <Alrt type="info" msg="Set the HC differential for each pair. The receiving player gets that many strokes allocated by stroke index."/>
           {!t.pairs.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No pairs yet.</p>}
           {t.pairs.map((pair,pi)=>{
             const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
             const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
             const storedDiff=p1&&p2?getStoredDiff(p1.id,p2.id):null;
-            // When both players chosen and no manual override yet, suggest stored diff
-            const suggestDiff=storedDiff&&p1&&p2&&pair.hcp1==null&&pair.hcp2==null;
+            const suggestDiff=storedDiff&&p1&&p2&&pair.diff==null;
+            // Derive current diff display — support legacy hcp1/hcp2 pairs
+            const curDiff=pair.diff!=null?pair.diff:(pair.hcp1!=null&&pair.hcp2!=null?Math.round(Math.abs(parseFloat(pair.hcp1)-parseFloat(pair.hcp2))):null);
+            const curHigher=pair.higherPId||(pair.hcp1!=null&&pair.hcp2!=null?(parseFloat(pair.hcp1)>=parseFloat(pair.hcp2)?pair.p1Id:pair.p2Id):null);
+            const higherName=curHigher?(String(curHigher)===String(pair.p1Id)?p1?.name:p2?.name):null;
             return(
               <div key={pair.id} className="pair-card">
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <div style={{fontWeight:700,fontSize:13,color:"var(--green)"}}>Pair {pi+1}</div>
                   <button className="btn btn-sm btn-danger" onClick={()=>removePair(pair.id)}>Remove</button>
                 </div>
-                <div className="fg fg4">
+                <div className="fg fg2" style={{marginBottom:10}}>
                   <div className="ff"><label>Player A</label>
                     <select value={pair.p1Id||""} onChange={e=>setPairF(pair.id,"p1Id",e.target.value||null)}>
                       <option value="">— Select —</option>
-                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                  </div>
-                  <div className="ff"><label>HC Override A</label>
-                    <input type="text" inputMode="decimal"
-                      value={pair.hcp1!=null?String(pair.hcp1):(p1?.handicap!=null?String(p1.handicap):"")}
-                      onChange={e=>{const v=e.target.value;setPairF(pair.id,"hcp1",v===""?null:v);}}
-                      onBlur={e=>{const v=parseFloat(e.target.value);setPairF(pair.id,"hcp1",isNaN(v)?null:v);}}
-                      placeholder={p1?String(p1.handicap):"HC"}/>
                   </div>
                   <div className="ff"><label>Player B</label>
                     <select value={pair.p2Id||""} onChange={e=>setPairF(pair.id,"p2Id",e.target.value||null)}>
                       <option value="">— Select —</option>
-                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name} (HC {p.handicap})</option>)}
+                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </div>
-                  <div className="ff"><label>HC Override B</label>
-                    <input type="text" inputMode="decimal"
-                      value={pair.hcp2!=null?String(pair.hcp2):(p2?.handicap!=null?String(p2.handicap):"")}
-                      onChange={e=>{const v=e.target.value;setPairF(pair.id,"hcp2",v===""?null:v);}}
-                      onBlur={e=>{const v=parseFloat(e.target.value);setPairF(pair.id,"hcp2",isNaN(v)?null:v);}}
-                      placeholder={p2?String(p2.handicap):"HC"}/>
-                  </div>
                 </div>
-                {storedDiff&&p1&&p2&&(
-                  <div style={{marginTop:6,padding:"5px 10px",background:"#e8f5e9",borderRadius:6,fontSize:11.5,color:"var(--green)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                    <span>📊 Stored differential: <strong>+{storedDiff.diff}</strong> to {storedDiff.higherHcpId===String(p1.id)?p1.name.split(" ")[0]:p2.name.split(" ")[0]}</span>
-                    {suggestDiff&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:"2px 8px"}} onClick={()=>{
-                      // Apply stored diff — higher HC player gets higher HC
-                      const isP1Higher=storedDiff.higherHcpId===String(p1.id);
-                      const baseHcp=Math.min(p1.handicap,p2.handicap);
-                      setPairF(pair.id,"hcp1",isP1Higher?baseHcp+storedDiff.diff:baseHcp);
-                      setPairF(pair.id,"hcp2",isP1Higher?baseHcp:baseHcp+storedDiff.diff);
-                    }}>Apply ↓</button>}
+                {p1&&p2&&(
+                  <div className="fg fg2">
+                    <div className="ff"><label>HC differential</label>
+                      <input type="number" inputMode="numeric" min="0" max="36"
+                        value={curDiff!=null?String(curDiff):""}
+                        onChange={e=>{const v=e.target.value;setPairF(pair.id,"diff",v===""?null:parseInt(v)||0);}}
+                        onBlur={e=>{const v=parseInt(e.target.value);setPairF(pair.id,"diff",isNaN(v)?null:Math.max(0,v));}}
+                        placeholder="0"/>
+                    </div>
+                    <div className="ff"><label>Strokes given to</label>
+                      <select value={curHigher||""} onChange={e=>setPairF(pair.id,"higherPId",e.target.value||null)}>
+                        <option value="">— Select —</option>
+                        <option value={String(pair.p1Id)}>{p1.name}</option>
+                        <option value={String(pair.p2Id)}>{p2.name}</option>
+                      </select>
+                    </div>
                   </div>
                 )}
-                {p1&&p2&&<div style={{marginTop:9,textAlign:"center",fontSize:12.5,fontWeight:700,color:"var(--green-mid)"}}>
-                  ⚔️ {p1.name} (HC {pair.hcp1!=null?pair.hcp1:p1.handicap}) vs {p2.name} (HC {pair.hcp2!=null?pair.hcp2:p2.handicap})
-                </div>}
+                {p1&&p2&&curDiff!=null&&higherName&&(
+                  <div style={{marginTop:8,padding:"7px 10px",background:"#e8f5e9",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>⚔️ {higherName} receives {curDiff} stroke{curDiff!==1?"s":""}</span>
+                    <span style={{fontSize:11,color:"var(--gray-400)"}}>allocated by SI</span>
+                  </div>
+                )}
+                {storedDiff&&p1&&p2&&(
+                  <div style={{marginTop:6,padding:"5px 10px",background:"var(--gray-50)",borderRadius:6,fontSize:12,color:"var(--gray-600)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span>Last round: <strong>+{storedDiff.diff}</strong> to {storedDiff.higherHcpId===String(p1.id)?p1.name.split(" ")[0]:p2.name.split(" ")[0]}</span>
+                    {suggestDiff&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:"2px 8px"}} onClick={()=>{
+                      const isP1Higher=storedDiff.higherHcpId===String(p1.id);
+                      setPairF(pair.id,"diff",storedDiff.diff);
+                      setPairF(pair.id,"higherPId",isP1Higher?String(p1.id):String(p2.id));
+                    }}>Apply</button>}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1572,12 +1592,10 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         const pp1=data.players.find(p=>String(p.id)===String(pair.p1Id));
         const pp2=data.players.find(p=>String(p.id)===String(pair.p2Id));
         if(!pp1||!pp2)return;
-        const pr=calcPair({p1:pp1,p2:pp2,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+        const pr=calcPair({p1:pp1,p2:pp2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
         if(!pr.winner)return; // tied — no adjustment
-        const hcp1=pair.hcp1!=null?parseFloat(pair.hcp1):pp1.handicap;
-        const hcp2=pair.hcp2!=null?parseFloat(pair.hcp2):pp2.handicap;
-        const currentDiff=Math.round(Math.abs(hcp1-hcp2));
-        const higherHcpId=hcp1>=hcp2?String(pp1.id):String(pp2.id);
+        const currentDiff=pr.hcpDiff;
+        const higherHcpId=pr.p1Higher?String(pp1.id):String(pp2.id);
         const winnerId=String(pr.winner.id);
         // Differential adjustment:
         // Higher-HC player gives strokes to lower-HC player
@@ -1595,6 +1613,11 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
   const startScoring=(gid)=>{
     updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==gid),gid]}));
     setActiveGid(gid);
+  };
+
+  const saveScores=(gid)=>{
+    // Save scores to state without releasing the lock — keeps session active
+    N("Scores saved ✔","ok");
   };
 
   const saveAndExit=(gid)=>{
@@ -1678,6 +1701,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
           <div className="card-title">{course.name} — Group Scorecard</div>
           <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={setScore} locked={false}/>
           <div className="btn-row" style={{marginTop:12}}>
+            <button className="btn btn-ghost btn-sm" onClick={()=>saveScores(g.id)}>💾 Save</button>
             <button className="btn btn-primary" onClick={()=>saveAndExit(g.id)}>{saving?<><Spin/>Saving…</>:"← Save & Exit"}</button>
             <button className="btn btn-danger btn-sm" onClick={()=>discardCard(g.id)}>🗑 Discard</button>
           </div>
@@ -1770,8 +1794,10 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
                     <span className="badge b-red" style={{animation:"pulse 1.5s ease-in-out infinite"}}>⏳ In Progress</span>
                     <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View Only</button>
                     <button className="btn btn-sm btn-gold" onClick={()=>{
-                      updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id]}));
+                      // Clear ALL scoringCards (kick any active sessions), then claim this one
+                      updateT(t.id,x=>({...x,scoringCards:[g.id]}));
                       setActiveGid(g.id);
+                      N("Session taken over — continuing from last saved scores");
                     }}>🎯 Take Over Scoring</button>
                     <button className="btn btn-sm btn-ghost" onClick={()=>{
                       updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id],lockedCards:[...(x.lockedCards||[]),g.id]}));
@@ -1818,7 +1844,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
       const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
       if(!p1||!p2)return null;
-      return calcPair({p1,p2,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+      return calcPair({p1,p2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
     }).filter(Boolean);
   // eslint-disable-next-line
   },[t.pairs,JSON.stringify(t.scores),data.players,course]);
@@ -1966,18 +1992,21 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
         const p1n=r.p1.name.split(" ")[0];const p2n=r.p2.name.split(" ")[0];
         const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
         const ptsDiff=Math.abs(r.pts1-r.pts2);
-        const netWinner=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+        const netWinnerWa=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
         const netDiff=Math.abs(totalNet1-totalNet2);
         const waLocked=(t.lockedCards||[]).some(id=>t.groups?.some(g=>g.playerIds?.includes(r.p1.id)&&g.id===id));
         const waVerb=waLocked?"wins":"leading";
         const ptsPart=ptsWinner?`${ptsWinner} ${waVerb} by ${ptsDiff} pt${ptsDiff!==1?"s":""}`:null;
-        const netPart=netWinner?`${netDiff} stroke${netDiff!==1?"s":""}`:null;
+        const netPart=netWinnerWa?`${netWinnerWa} ${waVerb} by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
         let waSummary;
-        if(ptsPart&&netPart){waSummary=`${ptsPart} and ${netPart}`;}
-        else if(ptsPart&&!netWinner){waSummary=`${ptsPart} (Strokeplay tied)`;}
-        else if(netPart&&!ptsWinner){const nw=totalNet1<totalNet2?p1n:p2n;waSummary=`${nw} ${waVerb} by ${netPart} (Stableford tied)`;}
+        if(ptsPart&&netPart){
+          if(ptsWinner===netWinnerWa){waSummary=`${ptsWinner} ${waVerb} by ${ptsDiff} pt${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+          else{waSummary=`${ptsPart} · ${netPart}`;}
+        }
+        else if(ptsPart&&!netWinnerWa){waSummary=`${ptsPart} (Strokeplay tied)`;}
+        else if(netPart&&!ptsWinner){waSummary=`${netPart} (Stableford tied)`;}
         else{waSummary="Stableford and Strokeplay tied";}
-        const hcNote=r.hcpDiff>0?` (+${r.hcpDiff} to ${r.hcp1>r.hcp2?p1n:p2n})`:"";
+        const hcNote=r.hcpDiff>0?` (+${r.hcpDiff} to ${r.p1Higher?p1n:p2n})`:"";
         lines.push(`  Pair ${i+1}: ${r.p1.name} vs ${r.p2.name}${hcNote}`);
         lines.push(`    ${r.pts1} – ${r.pts2} pts | Net: ${totalNet1} – ${totalNet2}`);
         lines.push(`    ${waSummary}`);
@@ -2135,18 +2164,21 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                 const cardLocked=(t.lockedCards||[]).some(id=>t.groups?.some(g=>g.playerIds?.includes(r.p1.id)&&g.id===id));
                 const verb=cardLocked?"wins":"leading";
                 const ptsPart=ptsWinner?`${ptsWinner} ${verb} by ${ptsDiff} point${ptsDiff!==1?"s":""}`:null;
-                const netPart=netWinner?`${netDiff} stroke${netDiff!==1?"s":""}`:null;
-                // Declare winner if either competition has a winner, even if the other is tied
+                const netWinnerName=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+                const netPart=netWinnerName?`${netWinnerName} ${verb} by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
                 let summary;
-                if(ptsPart&&netPart){summary=`${ptsPart} and ${netPart}`;}
-                else if(ptsPart&&!netWinner){summary=`${ptsPart} (Strokeplay tied)`;}
-                else if(netPart&&!ptsWinner){const nw=totalNet1<totalNet2?p1n:p2n;summary=`${nw} ${verb} by ${netPart} (Stableford tied)`;}
-                else if(!ptsWinner&&!netWinner){summary=null;}
+                if(ptsPart&&netPart){
+                  if(ptsWinner===netWinnerName){summary=`${ptsWinner} ${verb} by ${ptsDiff} point${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+                  else{summary=`${ptsPart} · ${netPart}`;}
+                }
+                else if(ptsPart&&!netWinnerName){summary=`${ptsPart} (Strokeplay tied)`;}
+                else if(netPart&&!ptsWinner){summary=`${netPart} (Stableford tied)`;}
+                else if(!ptsWinner&&!netWinnerName){summary=null;}
                 else{summary=ptsPart||null;}
                 return(<>
                 <div className="card-title">
                   <span>Pair {i+1}: {r.p1.name.split(" ")[0]} vs {r.p2.name.split(" ")[0]}</span>
-                  {r.hcpDiff>0?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.hcp1>r.hcp2?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>:null}
+                  {r.hcpDiff>0?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.p1Higher?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>:null}
                 </div>
                 {/* Always-visible summary */}
                 <div style={{marginBottom:10,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
@@ -2359,6 +2391,67 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
   );
 }
 
+// ── Autopress engine ──────────────────────────────────────────────────────────
+function calcAutopress(holeIdxs,teamA,teamB,scores,course){
+  function betterNet(team,hi){
+    return Math.min(...team.map(p=>{
+      const hc75=Math.round(p.handicap*0.75);
+      const allow=sa(hc75,course.holes[hi].si);
+      return (parseInt((scores[p.id]||[])[hi])||0)-allow;
+    }));
+  }
+  let matches=[{own:null,sc:0},{own:null,sc:0},{own:null,sc:0}];
+  let firstDone=false;
+  holeIdxs.forEach(hi=>{
+    const g1=parseInt((scores[teamA[0].id]||[])[hi])||0;
+    const g2=parseInt((scores[teamA[1]?.id]||[])[hi])||0;
+    const g3=parseInt((scores[teamB[0].id]||[])[hi])||0;
+    const g4=parseInt((scores[teamB[1]?.id]||[])[hi])||0;
+    if(!g1||!g3)return; // need scores from both teams
+    const nA=betterNet(teamA,hi),nB=betterNet(teamB,hi);
+    const res=nA<nB?"A":nB<nA?"B":"H";
+    if(res==="H")return;
+    if(!firstDone){
+      firstDone=true;
+      matches[0]={own:res,sc:1};
+      matches[1]={own:res==="A"?"B":"A",sc:1};
+      matches[2]={own:res,sc:1};
+    } else {
+      matches=matches.map(m=>{
+        if(!m.own)return{own:res,sc:1};
+        if(m.own===res)return{own:res,sc:m.sc+1};
+        const ns=m.sc-1;
+        return ns<=0?{own:res,sc:Math.abs(ns)}:{own:m.own,sc:ns};
+      });
+      if(matches[matches.length-1].sc===2)matches.push({own:null,sc:0});
+    }
+  });
+  let aW=0,bW=0;
+  matches.forEach(m=>{if(m.own==="A"&&m.sc>0)aW++;else if(m.own==="B"&&m.sc>0)bW++;});
+  return{aW,bW,net:aW-bW,state:matches.map(m=>m.sc).join("")};
+}
+
+function calcStraightMatchplay(holeIdxs,teamA,teamB,scores,course){
+  function betterNet(team,hi){
+    return Math.min(...team.map(p=>{
+      const hc75=Math.round(p.handicap*0.75);
+      const allow=sa(hc75,course.holes[hi].si);
+      return (parseInt((scores[p.id]||[])[hi])||0)-allow;
+    }));
+  }
+  let score=0;
+  holeIdxs.forEach(hi=>{
+    const g1=parseInt((scores[teamA[0].id]||[])[hi])||0;
+    const g3=parseInt((scores[teamB[0].id]||[])[hi])||0;
+    if(!g1||!g3)return;
+    const nA=betterNet(teamA,hi),nB=betterNet(teamB,hi);
+    if(nA<nB)score++; else if(nB<nA)score--;
+  });
+  const aW=Math.max(0,score),bW=Math.max(0,-score);
+  const stateStr=score>0?`A${Math.abs(score)}`:score<0?`B${Math.abs(score)}`:"AS";
+  return{aW,bW,net:score,state:stateStr};
+}
+
 // ── Standalone Scorecard Page ─────────────────────────────────────────────────
 function ScorecardPage({data,url,refresh}){
   const [cid,setCid]=useState(()=>data.courses[0]?.id||null);
@@ -2367,15 +2460,141 @@ function ScorecardPage({data,url,refresh}){
   const [done,setDone]=useState(false);
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState(null);
+  // Match format
+  const [matchFmt,setMatchFmt]=useState("none"); // none | autopress | matchplay
+  const [teamA,setTeamA]=useState([]); // player ids
+  const [teamB,setTeamB]=useState([]); // player ids
+  // Ratha Ratha pairs
+  const [rrPairs,setRrPairs]=useState([]);
+  const [expandedPairs,setExpandedPairs]=useState(new Set());
+
   const course=data.courses.find(c=>String(c.id)===String(cid));
-  const N=(t,tp="ok")=>{setMsg({t,tp});setTimeout(()=>setMsg(null),4000);};
+  const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
 
   const toggle=p=>{
-    if(sel.find(x=>x.id===p.id)){setSel(sel.filter(x=>x.id!==p.id));}
+    if(sel.find(x=>x.id===p.id)){
+      setSel(sel.filter(x=>x.id!==p.id));
+      setTeamA(teamA.filter(id=>id!==p.id));
+      setTeamB(teamB.filter(id=>id!==p.id));
+    }
     else if(sel.length<4){setSel([...sel,p]);if(!scores[p.id])setScores(s=>({...s,[p.id]:Array(18).fill("")}));}
     else N("Max 4 players per scorecard","warn");
   };
   const setScore=(pid,h,v)=>setScores(s=>({...s,[pid]:s[pid].map((x,i)=>i===h?v:x)}));
+
+  const toggleTeam=(team,pid)=>{
+    if(team==="A"){
+      if(teamA.includes(pid)){setTeamA(teamA.filter(id=>id!==pid));}
+      else{setTeamA([...teamA.filter(id=>!teamB.includes(id)||true),pid]);setTeamB(teamB.filter(id=>id!==pid));}
+    } else {
+      if(teamB.includes(pid)){setTeamB(teamB.filter(id=>id!==pid));}
+      else{setTeamB([...teamB,pid]);setTeamA(teamA.filter(id=>id!==pid));}
+    }
+  };
+
+  const addRrPair=()=>setRrPairs(p=>[...p,{id:Date.now(),p1Id:null,p2Id:null,diff:null,higherPId:null}]);
+  const removeRrPair=(id)=>setRrPairs(p=>p.filter(x=>x.id!==id));
+  const setRrF=(id,k,v)=>setRrPairs(p=>p.map(x=>x.id===id?{...x,[k]:v}:x));
+  const togglePair=(i)=>setExpandedPairs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
+
+  // Computed results
+  const selResults=useMemo(()=>{
+    if(!course||!sel.length)return[];
+    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+  },[sel,scores,course]);
+
+  const tAPlayers=sel.filter(p=>teamA.includes(p.id));
+  const tBPlayers=sel.filter(p=>teamB.includes(p.id));
+  const canMatch=tAPlayers.length>=1&&tBPlayers.length>=1;
+
+  const matchResults=useMemo(()=>{
+    if(!course||!canMatch||matchFmt==="none")return null;
+    const fn=matchFmt==="autopress"?calcAutopress:calcStraightMatchplay;
+    const f9=fn([0,1,2,3,4,5,6,7,8],tAPlayers,tBPlayers,scores,course);
+    const b9=fn([9,10,11,12,13,14,15,16,17],tAPlayers,tBPlayers,scores,course);
+    const f18=fn([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17],tAPlayers,tBPlayers,scores,course);
+    return{f9,b9,f18};
+  // eslint-disable-next-line
+  },[matchFmt,canMatch,tAPlayers.map(p=>p.id).join(),tBPlayers.map(p=>p.id).join(),JSON.stringify(scores),course]);
+
+  const rrResults=useMemo(()=>{
+    if(!course||!rrPairs.length)return[];
+    return rrPairs.filter(rp=>rp.p1Id&&rp.p2Id).map(rp=>{
+      const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
+      const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
+      if(!p1||!p2)return null;
+      return calcPair({p1,p2,diff:rp.diff,higherPId:rp.higherPId},course,scores);
+    }).filter(Boolean);
+  // eslint-disable-next-line
+  },[rrPairs,JSON.stringify(scores),course]);
+
+  const tAName=tAPlayers.map(p=>p.name.split(" ")[0]).join("/");
+  const tBName=tBPlayers.map(p=>p.name.split(" ")[0]).join("/");
+
+  const fmtMatchResult=(r,label,isHalf)=>{
+    const winner=r.net>0?tAName:r.net<0?tBName:null;
+    const n=Math.abs(r.net);
+    const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+    const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+    const col=r.net>0?"var(--green)":r.net<0?"var(--blue)":"var(--gray-400)";
+    return(
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--gray-100)"}}>
+        <span style={{fontSize:13,fontWeight:600,color:"var(--gray-600)"}}>{label}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:13,fontWeight:700,color:col}}>{txt}</span>
+          <span style={{fontFamily:"monospace",fontSize:12,padding:"2px 8px",background:"var(--gray-50)",borderRadius:6,color:"var(--gray-500)"}}>{r.state}</span>
+        </div>
+      </div>
+    );
+  };
+
+  // WhatsApp & email
+  const buildWaText=()=>{
+    const lines=[];
+    if(matchResults){
+      const fmt=matchFmt==="autopress"?"🎯 Autopress":"⚔️ Straight Matchplay";
+      lines.push(`*${fmt} — ${tAName} vs ${tBName}:*`);
+      const fmtLine=(r,label,isHalf)=>{
+        const winner=r.net>0?tAName:r.net<0?tBName:null;
+        const n=Math.abs(r.net);
+        const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+        const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+        lines.push(`  ${label.padEnd(8)} — ${txt}  (${r.state})`);
+      };
+      fmtLine(matchResults.f9,"Front 9",true);
+      fmtLine(matchResults.b9,"Back 9",true);
+      fmtLine(matchResults.f18,"Full 18",false);
+      lines.push("");
+    }
+    if(rrResults.length){
+      lines.push("*⚔️ Ratha Ratha:*");
+      rrResults.forEach((r,i)=>{
+        const p1n=r.p1.name.split(" ")[0],p2n=r.p2.name.split(" ")[0];
+        const scoredHoles=r.holes.filter(h=>h.net1!==null);
+        const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+        const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+        const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+        const ptsDiff=Math.abs(r.pts1-r.pts2);
+        const netWinner=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+        const netDiff=Math.abs(totalNet1-totalNet2);
+        let summary;
+        if(ptsWinner&&netWinner){
+          if(ptsWinner===netWinner){summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+          else{summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} · ${netWinner} leads by ${netDiff} stroke${netDiff!==1?"s":""}`;}
+        } else if(ptsWinner){summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} (Strokeplay tied)`;}
+        else if(netWinner){summary=`${netWinner} leads by ${netDiff} stroke${netDiff!==1?"s":""} (Stableford tied)`;}
+        else{summary="All square";}
+        lines.push(`  Pair ${i+1}: ${r.p1.name} vs ${r.p2.name} — ${summary}`);
+      });
+    }
+    return lines.join("\n");
+  };
+
+  const sendWhatsApp=()=>{
+    const txt=buildWaText();
+    if(!txt)return N("No results to share yet","warn");
+    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`,"_blank");
+  };
 
   const submit=async()=>{
     if(!course||!sel.length)return N("Select a course and at least one player","error");
@@ -2383,8 +2602,19 @@ function ScorecardPage({data,url,refresh}){
     try{
       const date=new Date().toISOString().split("T")[0];
       const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
-      if(url){await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));await refresh();N("Saved to Google Sheet ✓");}
-      else N("Saved locally (not connected to Sheet)","warn");
+      if(url){
+        await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
+        await refresh();
+      }
+      // Build mailto
+      const dateStr=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+      const subject=encodeURIComponent(`Scorecard — ${course.name} — ${dateStr}`);
+      const emailAddr=prompt("Send to (comma-separated emails):","tour.kga.in");
+      if(emailAddr){
+        const body=encodeURIComponent(`Please find the scorecard for ${course.name} on ${dateStr} attached.\n\n${buildWaText().replace(/\*/g,"")}`);
+        window.open(`mailto:${emailAddr}?subject=${subject}&body=${body}`);
+      }
+      N("Scores saved ✓");
       setDone(true);
     }catch(e){N("Error: "+e.message,"error");}
     setBusy(false);
@@ -2396,19 +2626,29 @@ function ScorecardPage({data,url,refresh}){
     </div>
   );
 
+  const hasResults=selResults.some(r=>r.gross>0);
+
   return(
     <div>
-      <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard — not linked to any tournament</p></div></div>
+      <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard</p></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+
+      {/* ── Setup ── */}
       <div className="card">
         <div className="card-title">Setup</div>
-        <div className="ff" style={{marginBottom:14}}><label>Course</label>
-          <select value={cid||""} onChange={e=>{setCid(e.target.value);setDone(false);}}>
-            {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+        <div className="fg fg2" style={{marginBottom:12}}>
+          <div className="ff"><label>Course</label>
+            <select value={cid||""} onChange={e=>{setCid(e.target.value);setDone(false);}}>
+              {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="ff"><label>Date</label>
+            <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
+          </div>
         </div>
-        <div className="section-title">Players (max 4)</div>
-        <div className="psel">
+
+        <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
+        <div className="psel" style={{marginBottom:16}}>
           {data.players.map(p=>(
             <div key={p.id} className={"pchip"+(sel.find(x=>x.id===p.id)?" on":"")} onClick={()=>toggle(p)}>
               <span>{sel.find(x=>x.id===p.id)?"✓":"○"}</span>
@@ -2416,15 +2656,232 @@ function ScorecardPage({data,url,refresh}){
             </div>
           ))}
         </div>
+
+        {/* Match format */}
+        <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginBottom:matchFmt!=="none"?12:0}}>
+          <div className="section-title" style={{marginBottom:8}}>Match format</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {["none","autopress","matchplay"].map(f=>(
+              <button key={f} onClick={()=>setMatchFmt(f)}
+                style={{padding:"5px 14px",borderRadius:7,border:"1.5px solid",fontSize:12,fontWeight:600,cursor:"pointer",
+                  background:matchFmt===f?"var(--green)":"white",
+                  color:matchFmt===f?"white":"var(--gray-600)",
+                  borderColor:matchFmt===f?"var(--green)":"var(--gray-200)"}}>
+                {f==="none"?"None":f==="autopress"?"Autopress":"Straight matchplay"}
+              </button>
+            ))}
+          </div>
+          {matchFmt!=="none"&&sel.length>=2&&(
+            <div className="fg fg2">
+              <div>
+                <div style={{fontSize:11,color:"var(--green)",fontWeight:700,marginBottom:5}}>Team A</div>
+                {sel.map(p=>(
+                  <div key={p.id} className={"pchip"+(teamA.includes(p.id)?" on":"")}
+                    style={{marginBottom:4,background:teamA.includes(p.id)?"#e8f5e9":"white",borderColor:teamA.includes(p.id)?"var(--green)":"var(--gray-200)"}}
+                    onClick={()=>toggleTeam("A",p.id)}>
+                    <span style={{flex:1,fontSize:12}}>{p.name}</span>
+                    <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{fontSize:11,color:"var(--blue)",fontWeight:700,marginBottom:5}}>Team B</div>
+                {sel.map(p=>(
+                  <div key={p.id} className={"pchip"+(teamB.includes(p.id)?" on":"")}
+                    style={{marginBottom:4,background:teamB.includes(p.id)?"#e3f2fd":"white",borderColor:teamB.includes(p.id)?"var(--blue)":"var(--gray-200)"}}
+                    onClick={()=>toggleTeam("B",p.id)}>
+                    <span style={{flex:1,fontSize:12}}>{p.name}</span>
+                    <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Ratha Ratha */}
+        <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div className="section-title">Ratha Ratha pairs (optional)</div>
+            <button className="btn btn-sm btn-primary" onClick={addRrPair}>+ Add pair</button>
+          </div>
+          {rrPairs.map((rp,pi)=>{
+            const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
+            const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
+            const curDiff=rp.diff!=null?rp.diff:null;
+            const higherName=rp.higherPId?(String(rp.higherPId)===String(rp.p1Id)?p1?.name:p2?.name):null;
+            return(
+              <div key={rp.id} className="pair-card">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontWeight:700,fontSize:12,color:"var(--green)"}}>Pair {pi+1}</span>
+                  <button className="btn btn-sm btn-danger" onClick={()=>removeRrPair(rp.id)}>Remove</button>
+                </div>
+                <div className="fg fg2" style={{marginBottom:8}}>
+                  <div className="ff"><label>Player A</label>
+                    <select value={rp.p1Id||""} onChange={e=>setRrF(rp.id,"p1Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="ff"><label>Player B</label>
+                    <select value={rp.p2Id||""} onChange={e=>setRrF(rp.id,"p2Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {p1&&p2&&(
+                  <div className="fg fg2">
+                    <div className="ff"><label>HC differential</label>
+                      <input type="number" inputMode="numeric" min="0" max="36"
+                        value={curDiff!=null?String(curDiff):""}
+                        onChange={e=>setRrF(rp.id,"diff",e.target.value===""?null:parseInt(e.target.value)||0)}
+                        placeholder="0"/>
+                    </div>
+                    <div className="ff"><label>Strokes given to</label>
+                      <select value={rp.higherPId||""} onChange={e=>setRrF(rp.id,"higherPId",e.target.value||null)}>
+                        <option value="">— Select —</option>
+                        <option value={String(rp.p1Id)}>{p1.name}</option>
+                        <option value={String(rp.p2Id)}>{p2.name}</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                {p1&&p2&&curDiff!=null&&higherName&&(
+                  <div style={{marginTop:8,padding:"6px 10px",background:"#e8f5e9",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>{higherName} receives {curDiff} stroke{curDiff!==1?"s":""}</span>
+                    <span style={{fontSize:11,color:"var(--gray-400)"}}>by SI</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!rrPairs.length&&<p style={{fontSize:12,color:"var(--gray-400)"}}>No pairs yet.</p>}
+        </div>
       </div>
+
+      {/* ── Scorecard grid ── */}
       {sel.length>0&&course&&(
         <div className="card">
           <div className="card-title">{course.name}</div>
-          <ScorecardGrid course={course} players={sel} scores={scores} setScore={setScore} locked={done}/>
-          {!done
-            ?<div className="btn-row"><button className="btn btn-primary" onClick={submit} disabled={busy}>{busy?<><Spin/>Saving…</>:"Submit Scores"}</button></div>
-            :<div className="alert alert-ok" style={{marginTop:12}}>✓ Submitted! <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});}}>New Card</button></div>
-          }
+          <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
+          {!done?(
+            <div className="btn-row" style={{marginTop:12}}>
+              <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy?<><Spin/>Saving…</>:"Submit & Email"}</button>
+              {hasResults&&<button className="btn btn-wa" onClick={sendWhatsApp}>📲 WhatsApp</button>}
+            </div>
+          ):(
+            <div className="alert alert-ok" style={{marginTop:12}}>
+              ✓ Submitted!
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);}}>New Card</button>
+              <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Results ── */}
+      {hasResults&&(
+        <div>
+          {/* Match results */}
+          {matchResults&&canMatch&&(
+            <div className="card">
+              <div className="card-title">
+                {matchFmt==="autopress"?"🎯 Autopress":"⚔️ Straight matchplay"}
+                <span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>{tAName} vs {tBName}</span>
+              </div>
+              {fmtMatchResult(matchResults.f9,"Front 9",true)}
+              {fmtMatchResult(matchResults.b9,"Back 9",true)}
+              <div style={{borderBottom:"none"}}>{fmtMatchResult(matchResults.f18,"Full 18",false)}</div>
+            </div>
+          )}
+
+          {/* Ratha Ratha results */}
+          {rrResults.map((r,i)=>{
+            const p1n=r.p1.name.split(" ")[0],p2n=r.p2.name.split(" ")[0];
+            const scoredHoles=r.holes.filter(h=>h.net1!==null);
+            const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+            const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+            const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+            const ptsDiff=Math.abs(r.pts1-r.pts2);
+            const netWinnerName=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+            const netDiff=Math.abs(totalNet1-totalNet2);
+            const netPart=netWinnerName?`${netWinnerName} leads by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
+            const ptsPart=ptsWinner?`${ptsWinner} leads by ${ptsDiff} point${ptsDiff!==1?"s":""}`:null;
+            let summary;
+            if(ptsPart&&netPart){
+              if(ptsWinner===netWinnerName){summary=`${ptsWinner} leads by ${ptsDiff} point${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+              else{summary=`${ptsPart} · ${netPart}`;}
+            } else if(ptsPart&&!netWinnerName){summary=`${ptsPart} (Strokeplay tied)`;}
+            else if(netPart&&!ptsWinner){summary=`${netPart} (Stableford tied)`;}
+            else{summary=null;}
+            return(
+              <div key={i} className="card">
+                <div className="card-title">
+                  <span>Pair {i+1}: {r.p1.name.split(" ")[0]} vs {r.p2.name.split(" ")[0]}</span>
+                  {r.hcpDiff>0&&<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.p1Higher?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>}
+                </div>
+                <div style={{marginBottom:10,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
+                  {summary
+                    ?<span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>🏆 {summary}</span>
+                    :<span style={{fontSize:13,color:"var(--gray-400)",fontStyle:"italic"}}>🤝 All square</span>
+                  }
+                </div>
+                <button onClick={()=>togglePair(i)} style={{width:"100%",background:"var(--gray-100)",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:600,color:"var(--gray-500)",cursor:"pointer",textAlign:"center",marginBottom:8}}>
+                  {expandedPairs.has(i)?"▲ Hide hole detail":"▼ Show hole by hole"}
+                </button>
+                {expandedPairs.has(i)&&(
+                  <div style={{overflowX:"auto",marginBottom:4}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr style={{background:"var(--green)",color:"white"}}>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Hole</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>SI</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Par</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p1n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p2n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Allow</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p1n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p2n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p1n} Net</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p2n} Net</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.holes.map((h,hi)=>{
+                          const scored=h.g1!==null&&h.g2!==null;
+                          const rowBg=hi%2===0?"#fafafa":"white";
+                          const p1wins=scored&&h.holeDiff>0;
+                          const p2wins=scored&&h.holeDiff<0;
+                          return(
+                            <tr key={hi} style={{background:rowBg}}>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700}}>{h.hole}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{h.si}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center"}}>{h.par}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p1wins?700:400,color:p1wins?"var(--green)":"inherit"}}>{h.g1??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p2wins?700:400,color:p2wins?"var(--green)":"inherit"}}>{h.g2??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{scored?(h.allow>0?"+1":"·"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p1wins?"var(--green)":"var(--gray-300)"}}>{scored?(p1wins?h.sf1:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p2wins?"var(--green)":"var(--gray-300)"}}>{scored?(p2wins?h.sf2:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net1:""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net2:""}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{background:"#1a4731",color:"white",fontWeight:700,fontSize:11}}>
+                          <td colSpan={6} style={{padding:"5px 6px",textAlign:"right",letterSpacing:.5}}>TOTAL</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts2}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet2}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
