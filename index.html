@@ -969,7 +969,8 @@ function CoursesPage({data,url,refresh,setData}){
   const imgRef=useRef();
 
   const runSearch=async(name,location)=>{
-    if(!name||name.length<3||!url)return;
+    if(!name||name.length<3)return;
+    if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
     setSearchBusy(true);setSearchResults(null);
     try{
       const res=await apiPost(url,"searchCourses",{name:name.trim(),location:(location||"").trim()});
@@ -987,7 +988,8 @@ function CoursesPage({data,url,refresh,setData}){
     setForm(f=>({...f,name:val}));
     setSearchResults(null);
     if(searchTimerRef.current)clearTimeout(searchTimerRef.current);
-    if(val.length>=3&&url){
+    if(val.length>=3){
+      if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
       searchTimerRef.current=setTimeout(()=>runSearch(val,locationRef.current),600);
     }
   };
