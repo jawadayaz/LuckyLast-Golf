@@ -317,6 +317,14 @@ async function apiPost(url,action,data){
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 function sa(hcp,si){const h=Math.round(hcp);return Math.floor(h/18)+(si<=(h%18)?1:0);}
+function courseHcp(player,course){
+  // WHS: Course Handicap = Index × (Slope ÷ 113) + (Course Rating − Par)
+  const idx=parseFloat(player.handicap)||0;
+  const slope=parseFloat(course?.slopeRating)||113;
+  const rating=parseFloat(course?.courseRating)||course?.par||72;
+  const par=course?.par||72;
+  return Math.round(idx*(slope/113)+(rating-par));
+}
 function sfPts(gross,par,allow){return Math.max(0,par-(gross-allow)+2);}
 function calcFormats(players,course){
   return players.map(({playerId,playerName,handicap,scores:sc})=>{
@@ -467,7 +475,7 @@ function Alrt({type,msg,onClose}){
 }
 function Spin({dark}){return <span className={"spinner"+(dark?" spinner-dark":"")}/>;}
 
-function ScorecardGrid({course,players,scores,setScore,locked,showMsf}){
+function ScorecardGrid({course,players,scores,setScore,locked,showMsf,showCourseHcp}){
   const cls=(g,p)=>{if(!g||!p)return"";const d=parseInt(g)-p;return d<=-2?"eagle":d===-1?"birdie":d===0?"par":d===1?"bogey":d===2?"double":"triple";};
   const t9=(pid,s)=>(scores[pid]||[]).slice(s,s+9).reduce((a,v)=>a+(parseInt(v)||0),0);
   if(!players.length)return null;
@@ -502,14 +510,15 @@ function ScorecardGrid({course,players,scores,setScore,locked,showMsf}){
           </tr>
           {players.map(p=>{
             const ps=scores[p.id]||Array(18).fill("");
-            const al=course.holes.map(h=>sa(p.handicap,h.si));
+            const chcp=courseHcp(p,course);
+            const al=course.holes.map(h=>sa(chcp,h.si));
             const tot=ps.reduce((a,v)=>a+(parseInt(v)||0),0);
-            const hc75=Math.round(p.handicap*0.75);
+            const hc75=Math.round(chcp*0.75);
             const msf=showMsf?course.holes.reduce((acc,h,i)=>{const g=parseInt(ps[i])||0;if(!g)return acc;return acc+sfPts(g,h.par,sa(hc75,h.si));},0):null;
             return <tr key={p.id}>
               <td style={{textAlign:"left",paddingLeft:9}}>
                 <div style={{fontWeight:700,fontSize:12}}>{p.name}</div>
-                <div style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</div>
+                <div style={{fontSize:10,color:"var(--gray-400)"}}>Idx {p.handicap}{showCourseHcp&&chcp!==Math.round(p.handicap)?<span style={{marginLeft:4,color:"var(--green-light)"}}>→ CH {chcp}</span>:""}</div>
               </td>
               {course.holes.slice(0,9).map((h,i)=>(
                 <td key={i}>
@@ -551,7 +560,7 @@ function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addP
 if(p.action==="saveTournaments")return cr(saveTournaments(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
 function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}return s;}
 function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
-function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h));}
+function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating"]));}
 function SS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i);return sheet("Scores",["ID","Date","CourseID","CourseName","PlayerID","PlayerName","Handicap","Tournament"].concat(h).concat(["Total","Stableford","ModStableford","StrokeNet","ModStroke"]));}
 function AS(){var s=sheet("Admins",["Email","Password"]);if(s.getLastRow()<=1)s.appendRow(["jawadayaz@gmail.com","luckylast"]);return s;}
 function getAll(){return{players:getPlayers(),courses:getCourses(),scores:getScores(),tournaments:getTournaments()};}
@@ -560,13 +569,13 @@ function getTournaments(){var s=TS(),r=s.getDataRange().getValues();if(r.length<
 function saveTournaments(data){var s=TS();if(s.getLastRow()<2)s.appendRow([JSON.stringify(data)]);else s.getRange(2,1).setValue(JSON.stringify(data));return{ok:true};}
 function getAdmins(){var r=AS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{email:r[0],password:r[1]};});}
 function getPlayers(){var r=PS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],name:r[1],email:r[2],handicap:parseFloat(r[3])||0};});}
-function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,holes:h};});}
+function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});var slope=parseFloat(r[40])||113;var cr=parseFloat(r[41])||parseInt(r[3])||72;return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,slopeRating:slope,courseRating:cr,holes:h};});}
 function getScores(){var r=SS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],date:r[1],courseId:r[2],courseName:r[3],playerId:r[4],playerName:r[5],handicap:r[6],tournament:r[7],scores:r.slice(8,26)};});}
 function addPlayer(p){PS().appendRow([Date.now(),p.name,p.email||"",p.handicap||0]);return{success:true};}
 function updatePlayer(p){var s=PS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(p.id)){if(p.name)s.getRange(i+1,2).setValue(p.name);s.getRange(i+1,4).setValue(p.handicap);return{success:true};}}return{success:false};}
 function deleteRow(n,id){var s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n);if(!s)return{success:false};var d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(id)){s.deleteRow(i+1);return{success:true};}}return{success:false};}
-function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h));return{success:true};}
-function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
+function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h).concat([c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0)]));return{success:true};}
+function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});row.push(c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0));s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
 function addScores(pl){var s=SS();pl.forEach(function(sc){var t=sc.scores.reduce(function(a,v){return a+(parseInt(v)||0);},0);s.appendRow([Date.now(),sc.date,sc.courseId,sc.courseName,sc.playerId,sc.playerName,sc.handicap,sc.tournament||""].concat(sc.scores).concat([t,sc.stableford||"",sc.modStableford||"",sc.strokeNet||"",sc.modStroke||""]));});return{success:true};}
 function getScorecardResult(token){
   if(!token)return{error:"No token"};
@@ -579,7 +588,7 @@ function extractScorecard(d){
   // Set your Anthropic API key: Apps Script > Project Settings > Script properties > Add: ANTHROPIC_KEY = sk-ant-...
   var key=PropertiesService.getScriptProperties().getProperty("ANTHROPIC_KEY");
   if(!key)return{error:"Add ANTHROPIC_KEY to Script Properties in Apps Script project settings"};
-  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18.'}]}]};
+  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",slopeRating:113,courseRating:72.0,holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. Include slopeRating (55-155) and courseRating (decimal) if visible on the card, otherwise use 113 and total par respectively.'}]}]};
   var res=UrlFetchApp.fetch("https://api.anthropic.com/v1/messages",{method:"post",contentType:"application/json",headers:{"x-api-key":key,"anthropic-version":"2023-06-01"},payload:JSON.stringify(payload),muteHttpExceptions:true});
   var j=JSON.parse(res.getContentText());
   if(j.error)return{error:j.error.message||JSON.stringify(j.error)};
@@ -800,7 +809,7 @@ function PlayersPage({data,url,refresh,setData}){
         <div className="fg fg3">
           <div className="ff"><label>Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Full Name"/></div>
           <div className="ff"><label>Email</label><input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="email@example.com"/></div>
-          <div className="ff"><label>Handicap</label><input type="text" inputMode="decimal" value={form.handicap} onChange={e=>setForm({...form,handicap:e.target.value.replace(/[^0-9.]/g,"")})} placeholder="0"/></div>
+          <div className="ff"><label>Handicap Index</label><input type="text" inputMode="decimal" value={form.handicap} onChange={e=>setForm({...form,handicap:e.target.value.replace(/[^0-9.]/g,"")})} placeholder="0"/></div>
         </div>
         <div className="btn-row">
           <button className="btn btn-primary" onClick={add} disabled={busy}>{busy?<><Spin/>Adding…</>:"Add Player"}</button>
@@ -811,7 +820,7 @@ function PlayersPage({data,url,refresh,setData}){
         <div className="card-title">Roster ({data.players.length} players)</div>
         {!data.players.length?<p style={{fontSize:13,color:"var(--gray-400)"}}>No players yet — add some above.</p>:(
           <table className="dt">
-            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>HC</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>Idx</th><th></th></tr></thead>
             <tbody>
               {data.players.map((p,i)=>(
                 <tr key={p.id}>
@@ -906,7 +915,7 @@ async function extractCourseFromImage(file, gasUrl) {
 
 
 function CoursesPage({data,url,refresh,setData}){
-  const blank=()=>({name:"",location:"",holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
+  const blank=()=>({name:"",location:"",slopeRating:"113",courseRating:"",holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const [form,setForm]=useState(blank());
@@ -977,13 +986,15 @@ function CoursesPage({data,url,refresh,setData}){
     setBusy(true);
     try{
       const par=form.holes.reduce((a,h)=>a+h.par,0);
+      const slope=parseFloat(form.slopeRating)||113;
+      const rating=parseFloat(form.courseRating)||par;
       if(editId){
-        const upd={...form,id:editId,par};
+        const upd={...form,id:editId,par,slopeRating:slope,courseRating:rating};
         if(url){await apiPost(url,"updateCourse",upd);await refresh();}
         else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
         N("Course updated ✓");
       }else{
-        const nc={id:Date.now(),...form,par};
+        const nc={id:Date.now(),...form,par,slopeRating:slope,courseRating:rating};
         if(url){await apiPost(url,"addCourse",nc);await refresh();}
         else setData(d=>({...d,courses:[...d.courses,nc]}));
         N("Course added ✓");
@@ -993,7 +1004,7 @@ function CoursesPage({data,url,refresh,setData}){
     setBusy(false);
   };
 
-  const startEdit=(c)=>{setForm({name:c.name,location:c.location,holes:c.holes.map(h=>({...h}))});setEditId(c.id);setShowForm(true);};
+  const startEdit=(c)=>{setForm({name:c.name,location:c.location,slopeRating:String(c.slopeRating||113),courseRating:String(c.courseRating||""),holes:c.holes.map(h=>({...h}))});setEditId(c.id);setShowForm(true);};
 
   const del=(c)=>{
     setDlg({msg:"Delete \""+c.name+"\"?",detail:"This course will be permanently removed.",ok:async()=>{
@@ -1045,9 +1056,19 @@ function CoursesPage({data,url,refresh,setData}){
               </button>
             </div>
           </div>
-          <div className="fg fg2" style={{marginBottom:16}}>
+          <div className="fg fg2" style={{marginBottom:12}}>
             <div className="ff"><label>Course Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Royal Melbourne"/></div>
             <div className="ff"><label>Location</label><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City, Country"/></div>
+          </div>
+          <div className="fg fg2" style={{marginBottom:16}}>
+            <div className="ff">
+              <label>Slope Rating <span style={{fontWeight:400,color:"var(--gray-400)"}}>(55–155, standard 113)</span></label>
+              <input type="number" value={form.slopeRating||""} onChange={e=>setForm({...form,slopeRating:e.target.value})} placeholder="113"/>
+            </div>
+            <div className="ff">
+              <label>Course Rating <span style={{fontWeight:400,color:"var(--gray-400)"}}>(e.g. 71.4)</span></label>
+              <input type="number" step="0.1" value={form.courseRating||""} onChange={e=>setForm({...form,courseRating:e.target.value})} placeholder={String(form.holes?.reduce((a,h)=>a+h.par,0)||72)}/>
+            </div>
           </div>
           {[0,9].map(s=>(
             <div key={s} style={{marginBottom:13}}>
@@ -1083,7 +1104,7 @@ function CoursesPage({data,url,refresh,setData}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
             <div>
               <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--green)"}}>{c.name}</div>
-              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}</div>
+              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}{c.slopeRating&&c.slopeRating!==113?<span style={{marginLeft:6}}>· Slope {c.slopeRating}{c.courseRating&&c.courseRating!==c.par?" · CR "+c.courseRating:""}</span>:""}</div>
             </div>
             <div style={{display:"flex",gap:6}}>
               <button className="btn btn-sm btn-ghost" onClick={()=>startEdit(c)}>✏️ Edit</button>
@@ -1303,6 +1324,9 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
       </div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
 
+      {!t.courseId&&tab!=="details"&&(
+        <div className="alert alert-warn" style={{margin:"8px 0"}}>Select a course in the Details tab before setting up {tab}.</div>
+      )}
       {isRyder&&!ryderTeamsReady&&tab==="groups"&&(
         <div className="alert alert-warn" style={{margin:"8px 0"}}>Set up both teams before creating groups.</div>
       )}
@@ -1313,7 +1337,17 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
           {id:"groups",label:`Groups (${t.groups.length})`},
           !isRyder?{id:"teams",label:`Teams (${t.teams.length})`}:null,
           {id:"pairs",label:`Ratha Ratha Pairs (${t.pairs.length})`},
-        ].filter(Boolean).map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")+(s.warn?" tab-warn":"")} onClick={()=>setTab(s.id)}>{s.label}{s.warn?" ⚠️":""}</div>)}
+        ].filter(Boolean).map(s=>{
+          const needsCourse=s.id!=="details";
+          const locked=needsCourse&&!t.courseId;
+          return <div key={s.id}
+            className={"tab"+(tab===s.id?" on":"")+(s.warn?" tab-warn":"")+(locked?" disabled":"")}
+            style={{opacity:locked?0.4:1,cursor:locked?"not-allowed":"pointer",pointerEvents:locked?"none":"auto"}}
+            onClick={()=>!locked&&setTab(s.id)}
+            title={locked?"Select a course in Details first":""}>
+            {s.label}{s.warn?" ⚠️":""}
+          </div>;
+        })}
       </div>
 
       {tab==="details"&&(
@@ -1384,7 +1418,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                             onClick={()=>!taken&&toggleTeamP(team.id,p.id)}>
                             <span>{inThis?"✓":taken?"—":"○"}</span>
                             <span style={{flex:1}}>{p.name}</span>
-                            <span className="hc">{p.handicap}</span>
+                            <span className="hc">Idx {p.handicap}</span>
                           </div>
                         );
                       })}
@@ -1577,7 +1611,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         setSaving(false);return;
       }
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:t.name,scores:t.scores?.[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -1592,7 +1626,8 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         const pp1=data.players.find(p=>String(p.id)===String(pair.p1Id));
         const pp2=data.players.find(p=>String(p.id)===String(pair.p2Id));
         if(!pp1||!pp2)return;
-        const pr=calcPair({p1:pp1,p2:pp2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+        const fch1=courseHcp(pp1,course),fch2=courseHcp(pp2,course);
+        const pr=calcPair({p1:pp1,p2:pp2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1!=null?pair.hcp1:fch1,hcp2:pair.hcp2!=null?pair.hcp2:fch2},course,t.scores||{});
         if(!pr.winner)return; // tied — no adjustment
         const currentDiff=pr.hcpDiff;
         const higherHcpId=pr.p1Higher?String(pp1.id):String(pp2.id);
@@ -1665,9 +1700,9 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
           <div className="card">
             <div className="card-title">{complete?"Final Scores":"Live Scores"} {active&&!complete&&<span className="live-dot"/>}</div>
             <table className="dt">
-              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1699,7 +1734,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
         <div className="card">
           <div className="card-title">{course.name} — Group Scorecard</div>
-          <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={setScore} locked={false}/>
+          <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={setScore} locked={false} showCourseHcp={true}/>
           <div className="btn-row" style={{marginTop:12}}>
             <button className="btn btn-ghost btn-sm" onClick={()=>saveScores(g.id)}>💾 Save</button>
             <button className="btn btn-primary" onClick={()=>saveAndExit(g.id)}>{saving?<><Spin/>Saving…</>:"← Save & Exit"}</button>
@@ -1711,9 +1746,9 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
           <div className="card">
             <div className="card-title">Live Scores <span className="live-dot"/></div>
             <table className="dt">
-              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1764,7 +1799,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
               <div>
                 <div style={{fontWeight:700,fontSize:14,color:"var(--green)"}}>Group {gi+1}</div>
                 <div style={{fontSize:12.5,color:"var(--gray-600)",marginTop:3}}>
-                  {players.length?players.map(p=>`${p.name} (HC ${p.handicap})`).join(" · "):"Empty group"}
+                  {players.length?players.map(p=>`${p.name} (Idx ${p.handicap})`).join(" · "):"Empty group"}
                 </div>
                 {locked&&(
                   <div style={{fontSize:11,color:"#2e7d32",marginTop:3,fontWeight:700}}>🔒 Locked — view only</div>
@@ -1835,7 +1870,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
 
   const indivResults=useMemo(()=>{
     if(!course||!allPlayers.length)return[];
-    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
   },[allPlayers,t.scores,course]);
 
   const pairResults=useMemo(()=>{
@@ -1844,7 +1879,8 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
       const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
       if(!p1||!p2)return null;
-      return calcPair({p1,p2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+      const ch1=courseHcp(p1,course),ch2=courseHcp(p2,course);
+      return calcPair({p1,p2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1!=null?pair.hcp1:ch1,hcp2:pair.hcp2!=null?pair.hcp2:ch2},course,t.scores||{});
     }).filter(Boolean);
   // eslint-disable-next-line
   },[t.pairs,JSON.stringify(t.scores),data.players,course]);
@@ -1979,7 +2015,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       lines.push("*🏆 Individual Scores:*");
       const nameW=Math.max(...sf.map(r=>r.playerName.length));
       sf.forEach(r=>{
-        lines.push(`  ${r.pos}. ${r.playerName.padEnd(nameW)} — SF: ${String(r.stableford).padStart(2)} pts | Mod: ${String(r.modStableford).padStart(2)} pts (HC ${r.handicap})`);
+        lines.push(`  ${r.pos}. ${r.playerName.padEnd(nameW)} — SF: ${String(r.stableford).padStart(2)} pts | Mod: ${String(r.modStableford).padStart(2)} pts (CH ${r.handicap})`);
       });
       lines.push(``);
     }
@@ -2084,7 +2120,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                     <div className={"lbpos"+(r.pos===1?" p1":r.pos===2?" p2":r.pos===3?" p3":" pn")}>{r.pos}</div>
                     <div style={{flex:1}}>
                       <div style={{fontWeight:600,fontSize:13.5}}>{r.playerName}</div>
-                      <div style={{fontSize:11,color:"var(--gray-400)"}}>HC {r.handicap} · Gross {r.gross||"—"}</div>
+                      <div style={{fontSize:11,color:"var(--gray-400)"}}>CH {r.handicap} · Gross {r.gross||"—"}</div>
                     </div>
                     <div style={{fontFamily:"Playfair Display,serif",fontSize:22,fontWeight:700,color:"var(--green)"}}>{r[fmt.key]}</div>
                     {r.pos===1&&<span style={{fontSize:18}}>🏆</span>}
@@ -2120,9 +2156,9 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                       <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={null} locked={true}/>
                       <div style={{marginTop:12,overflowX:"auto"}}>
                         <table className="dt" style={{fontSize:12.5}}>
-                          <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+                          <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
                           <tbody>
-                            {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
+                            {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
                               <tr key={r.playerId}>
                                 <td style={{fontWeight:600}}>{r.playerName}</td>
                                 <td>{r.handicap}</td>
@@ -2347,12 +2383,12 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                             </tr></thead>
                             <tbody>
                               <tr>
-                                <td style={{fontWeight:600}}>{m.p1.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1.handicap} · {r.teamA.name}</div></td>
+                                <td style={{fontWeight:600}}>{m.p1.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>Idx {m.p1.handicap} · {r.teamA.name}</div></td>
                                 {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="B"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g1||"—"}</td>)}
                                 <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsA:m.mPtsB}</td>
                               </tr>
                               <tr>
-                                <td style={{fontWeight:600}}>{m.p2.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2.handicap} · {r.teamB.name}</div></td>
+                                <td style={{fontWeight:600}}>{m.p2.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>Idx {m.p2.handicap} · {r.teamB.name}</div></td>
                                 {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g2||"—"}</td>)}
                                 <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsB:m.mPtsA}</td>
                               </tr>
@@ -2378,7 +2414,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                 </div>
                 {r.members.map(m=>(
                   <div key={m.playerId} className="lbrow">
-                    <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.playerName}</div><div style={{fontSize:11,color:"var(--gray-400)"}}>HC {m.handicap}</div></div>
+                    <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.playerName}</div><div style={{fontSize:11,color:"var(--gray-400)"}}>CH {m.handicap}</div></div>
                     <div style={{fontWeight:700,color:"var(--green)",fontSize:14}}>{m.gross>0?m.modStableford:"—"} pts</div>
                   </div>
                 ))}
@@ -2452,6 +2488,11 @@ function calcStraightMatchplay(holeIdxs,teamA,teamB,scores,course){
   return{aW,bW,net:score,state:stateStr};
 }
 
+const SC_DRAFT_KEY="llg_sc_draft";
+function loadDraft(){try{const d=localStorage.getItem(SC_DRAFT_KEY);return d?JSON.parse(d):null;}catch{return null;}}
+function saveDraft(st){try{localStorage.setItem(SC_DRAFT_KEY,JSON.stringify(st));}catch{}}
+function clearDraft(){try{localStorage.removeItem(SC_DRAFT_KEY);}catch{}}
+
 // ── Standalone Scorecard Page ─────────────────────────────────────────────────
 function ScorecardPage({data,url,refresh}){
   const [cid,setCid]=useState(()=>data.courses[0]?.id||null);
@@ -2470,9 +2511,30 @@ function ScorecardPage({data,url,refresh}){
   // Ratha Ratha pairs
   const [rrPairs,setRrPairs]=useState([]);
   const [expandedPairs,setExpandedPairs]=useState(new Set());
+  // Draft recovery
+  const [draftDlg,setDraftDlg]=useState(()=>{
+    const d=loadDraft();
+    return d&&d.scores&&Object.values(d.scores).some(a=>a.some(v=>parseInt(v)>0))?d:null;
+  });
 
   const course=data.courses.find(c=>String(c.id)===String(cid));
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
+
+  // Restore draft
+  const restoreDraft=(d)=>{
+    if(!d)return;
+    if(d.cid)setCid(d.cid);
+    if(d.sel){const ps=d.sel.map(id=>data.players.find(p=>String(p.id)===String(id))).filter(Boolean);setSel(ps);}
+    if(d.scores)setScores(d.scores);
+    if(d.matchFmt)setMatchFmt(d.matchFmt);
+    if(d.teamA)setTeamA(d.teamA);
+    if(d.teamB)setTeamB(d.teamB);
+    if(d.teamsDone)setTeamsDone(d.teamsDone);
+    if(d.hcOverrides)setHcOverrides(d.hcOverrides);
+    if(d.rrPairs)setRrPairs(d.rrPairs);
+    setDraftDlg(null);
+  };
+  const discardDraft=()=>{clearDraft();setDraftDlg(null);};
 
   const toggle=p=>{
     if(sel.find(x=>x.id===p.id)){
@@ -2484,6 +2546,16 @@ function ScorecardPage({data,url,refresh}){
     else N("Max 4 players per scorecard","warn");
   };
   const setScore=(pid,h,v)=>setScores(s=>({...s,[pid]:s[pid].map((x,i)=>i===h?v:x)}));
+
+  // Auto-save draft whenever scores/setup changes
+  useEffect(()=>{
+    if(done)return; // don't save after submit
+    const hasAnyScore=Object.values(scores).some(a=>a.some(v=>parseInt(v)>0));
+    if(hasAnyScore||sel.length>0){
+      saveDraft({cid,sel:sel.map(p=>p.id),scores,matchFmt,teamA,teamB,teamsDone,hcOverrides,rrPairs,savedAt:new Date().toISOString()});
+    }
+  // eslint-disable-next-line
+  },[cid,sel,scores,matchFmt,teamA,teamB,teamsDone,hcOverrides,rrPairs,done]);
 
   const resetTeams=()=>{setTeamA([]);setTeamB([]);setTeamsDone(false);};
   const toggleTeam=(team,pid)=>{
@@ -2504,7 +2576,7 @@ function ScorecardPage({data,url,refresh}){
   // Computed results
   const selResults=useMemo(()=>{
     if(!course||!sel.length)return[];
-    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:scores[p.id]||Array(18).fill(0)})),course);
   },[sel,scores,course]);
 
   const tAPlayers=sel.filter(p=>teamA.includes(p.id)).map(p=>({...p,handicap:hcFor(p)}));
@@ -2606,7 +2678,7 @@ function ScorecardPage({data,url,refresh}){
     setBusy(true);
     try{
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:scores[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -2617,6 +2689,7 @@ function ScorecardPage({data,url,refresh}){
         const body=encodeURIComponent(`Scorecard for ${course.name} on ${dateStr}\n\n${buildWaText().replace(/\*/g,"")}`);
         window.open(`mailto:${emailAddr.trim()}?subject=${subject}&body=${body}`);
       }
+      clearDraft();
       N("Scores saved ✔");
       setDone(true);
     }catch(e){N("Error: "+e.message,"error");}
@@ -2648,6 +2721,31 @@ function ScorecardPage({data,url,refresh}){
       <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard</p></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
 
+      {/* ── Draft recovery dialog ── */}
+      {draftDlg&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"white",borderRadius:14,padding:"22px 20px",maxWidth:340,width:"100%",boxShadow:"0 8px 32px rgba(0,0,0,.2)"}}>
+            {(()=>{
+              const dc=draftDlg.cid?data.courses.find(c=>String(c.id)===String(draftDlg.cid)):null;
+              const ds=draftDlg.savedAt?new Date(draftDlg.savedAt).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"previous session";
+              return(
+                <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"var(--green)",marginBottom:8}}>
+                  Resume scorecard{dc?` for ${dc.name}`:""}{ds?` — ${ds}`:""}?
+                </div>
+              );
+            })()}
+            <p style={{fontSize:13,color:"var(--gray-600)",marginBottom:6,lineHeight:1.5}}>You have an unsubmitted scorecard from a previous session.</p>
+            {draftDlg.sel&&<p style={{fontSize:12,color:"var(--gray-400)",marginBottom:16}}>
+              Players: {draftDlg.sel.map(id=>{const p=data.players.find(p=>String(p.id)===String(id));return p?.name||id;}).join(", ")}
+            </p>}
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={discardDraft}>Start fresh</button>
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>restoreDraft(draftDlg)}>Resume →</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Setup ── */}
       <div className="card">
         <div className="card-title">Setup</div>
@@ -2663,11 +2761,12 @@ function ScorecardPage({data,url,refresh}){
         </div>
 
         <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
-        <div className="psel" style={{marginBottom:16}}>
+        {!course&&<div className="alert alert-warn" style={{marginBottom:8}}>Select a course above before adding players.</div>}
+        <div className="psel" style={{marginBottom:16,opacity:course?1:0.4,pointerEvents:course?"auto":"none"}}>
           {data.players.map(p=>(
             <div key={p.id} className={"pchip"+(sel.find(x=>x.id===p.id)?" on":"")} onClick={()=>toggle(p)}>
               <span>{sel.find(x=>x.id===p.id)?"✓":"○"}</span>
-              <span style={{flex:1}}>{p.name}</span><span className="hc">{p.handicap}</span>
+              <span style={{flex:1}}>{p.name}</span><span className="hc">Idx {p.handicap}</span>
             </div>
           ))}
         </div>
@@ -2708,7 +2807,7 @@ function ScorecardPage({data,url,refresh}){
                               style={{background:inA?"#e8f5e9":"white",borderColor:inA?"var(--green)":"var(--gray-200)"}}
                               onClick={()=>toggleTeam("A",p.id)}>
                               <span style={{flex:1,fontSize:12}}>{p.name}</span>
-                              <span style={{fontSize:10,color:inA?"var(--green)":"var(--gray-400)"}}>HC {p.handicap}</span>
+                              <span style={{fontSize:10,color:inA?"var(--green)":"var(--gray-400)"}}>CH {course?courseHcp(p,course):p.handicap}</span>
                             </div>
                             {inA&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,paddingLeft:4}}>
@@ -2734,7 +2833,7 @@ function ScorecardPage({data,url,refresh}){
                               style={{background:inB?"#e3f2fd":"white",borderColor:inB?"var(--blue)":"var(--gray-200)"}}
                               onClick={()=>toggleTeam("B",p.id)}>
                               <span style={{flex:1,fontSize:12}}>{p.name}</span>
-                              <span style={{fontSize:10,color:inB?"var(--blue)":"var(--gray-400)"}}>HC {p.handicap}</span>
+                              <span style={{fontSize:10,color:inB?"var(--blue)":"var(--gray-400)"}}>CH {course?courseHcp(p,course):p.handicap}</span>
                             </div>
                             {inB&&(
                               <div style={{display:"flex",alignItems:"center",gap:6,marginTop:3,paddingLeft:4}}>
@@ -2846,7 +2945,7 @@ function ScorecardPage({data,url,refresh}){
       {sel.length>0&&course&&(
         <div className="card">
           <div className="card-title">{course.name}</div>
-          <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
+          <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true} showCourseHcp={true}/>
           {!done?(
             <div className="btn-row" style={{marginTop:12}}>
               <button className="btn btn-primary" onClick={submit} disabled={busy}
@@ -2863,7 +2962,7 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);setHcOverrides({});}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);setHcOverrides({});clearDraft();}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
