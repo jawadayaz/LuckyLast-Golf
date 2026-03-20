@@ -574,7 +574,7 @@ const GAS=`// Lucky Last Golfers — Google Apps Script
 // Web app | Execute as: Me | Who has access: Anyone
 
 function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
-function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="searchCourses")return cr(searchCourses({name:e.parameter.name||"",location:e.parameter.location||""}),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
+function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;Logger.log("doGet action="+a+" params="+JSON.stringify(e.parameter));try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="ping")return cr({ok:true,version:"v2-searchCourses",time:new Date().toISOString()},cb);if(a==="searchCourses"){Logger.log("searchCourses called name="+e.parameter.name);var sr=searchCourses({name:e.parameter.name||"",location:e.parameter.location||""});Logger.log("searchCourses result="+JSON.stringify(sr).slice(0,200));return cr(sr,cb);}Logger.log("Unknown action: "+a);return cr({error:"Unknown: "+a},cb);}catch(err){Logger.log("doGet error: "+err.toString());return cr({error:err.toString()},cb);}}
 function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
 if(p.action==="saveTournaments")return cr(saveTournaments(p.data));
 if(p.action==="searchCourses")return cr(searchCourses(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
@@ -605,7 +605,9 @@ function getScorecardResult(token){
   try{return JSON.parse(val);}catch(e){return{error:"Parse error: "+e};}
 }
 function searchCourses(d){
+  Logger.log("searchCourses d="+JSON.stringify(d));
   var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
+  Logger.log("key present: "+(key?"yes":"no"));
   if(!key)return{error:"Add GOLF_COURSE_API_KEY to Script Properties"};
   var q=encodeURIComponent(d.name+(d.location?", "+d.location:""));
   var res=UrlFetchApp.fetch("https://api.golfcourseapi.com/v1/search?search_query="+q,{
