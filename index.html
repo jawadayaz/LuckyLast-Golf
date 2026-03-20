@@ -317,19 +317,30 @@ async function apiPost(url,action,data){
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 function sa(hcp,si){const h=Math.round(hcp);return Math.floor(h/18)+(si<=(h%18)?1:0);}
-const TEE_NAMES=["Back","Club","Front","Ladies"];
+function getCourseTeeNames(course){
+  if(course?.tees&&Object.keys(course.tees).length>0){
+    return Object.keys(course.tees).filter(k=>course.tees[k]?.slope);
+  }
+  return[];
+}
+function getDefaultTee(course){
+  const names=getCourseTeeNames(course);
+  if(!names.length)return"";
+  // Prefer a middle tee — skip first (hardest) and last (easiest) if 3+ tees
+  if(names.length>=3)return names[Math.floor(names.length/2)];
+  return names[0];
+}
 function getTeeData(course,tee){
-  // New model: course.tees = {Back:{slope,rating}, Club:{...}, ...}
   if(course?.tees){
-    const t=course.tees[tee||"Club"]||course.tees["Club"]||Object.values(course.tees).find(Boolean);
+    const t=course.tees[tee]||(tee?null:null)||Object.values(course.tees).find(v=>v?.slope);
     if(t)return{slope:parseFloat(t.slope)||113,rating:parseFloat(t.rating)||course?.par||72};
   }
-  // Legacy: single slopeRating/courseRating
   return{slope:parseFloat(course?.slopeRating)||113,rating:parseFloat(course?.courseRating)||course?.par||72};
 }
 function courseHcp(player,course,tee){
   const idx=parseFloat(player.handicap)||0;
-  const {slope,rating}=getTeeData(course,tee||player.tee||"Club");
+  const effectiveTee=tee||(course?getDefaultTee(course):"");
+  const {slope,rating}=getTeeData(course,effectiveTee);
   const par=course?.par||72;
   return Math.round(idx*(slope/113)+(rating-par));
 }
@@ -565,7 +576,8 @@ const GAS=`// Lucky Last Golfers — Google Apps Script
 function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
 function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
 function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
-if(p.action==="saveTournaments")return cr(saveTournaments(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
+if(p.action==="saveTournaments")return cr(saveTournaments(p.data));
+if(p.action==="searchCourses")return cr(searchCourses(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
 function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}return s;}
 function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
 function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating","Tees"]));}
@@ -592,11 +604,30 @@ function getScorecardResult(token){
   if(!val)return{error:"Result not ready — try waiting a few more seconds and refreshing"};
   try{return JSON.parse(val);}catch(e){return{error:"Parse error: "+e};}
 }
+function searchCourses(d){
+  var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
+  if(!key)return{error:"Add GOLF_COURSE_API_KEY to Script Properties"};
+  var q=encodeURIComponent(d.name+(d.location?", "+d.location:""));
+  var res=UrlFetchApp.fetch("https://api.golfcourseapi.com/v1/search?search_query="+q,{
+    method:"get",headers:{"Authorization":"Key "+key},muteHttpExceptions:true
+  });
+  var j=JSON.parse(res.getContentText());
+  if(j.error)return{error:j.error};
+  var courses=(j.courses||[]).slice(0,8).map(function(c){
+    var tees=(c.tees||[]).map(function(t){
+      return{name:t.tee_name||t.name,slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};
+    }).filter(function(t){return t.name&&t.slope;});
+    var holes=[];
+    if(c.holes){for(var i=0;i<c.holes.length;i++){holes.push({par:parseInt(c.holes[i].par)||4,si:parseInt(c.holes[i].handicap||c.holes[i].stroke_index)||i+1});}}
+    return{name:c.club_name||c.course_name||c.name,location:(c.city||"")+(c.state?", "+c.state:"")+(c.country?", "+c.country:""),tees:tees,holes:holes.length===18?holes:[]};
+  });
+  return{courses:courses};
+}
 function extractScorecard(d){
   // Set your Anthropic API key: Apps Script > Project Settings > Script properties > Add: ANTHROPIC_KEY = sk-ant-...
   var key=PropertiesService.getScriptProperties().getProperty("ANTHROPIC_KEY");
   if(!key)return{error:"Add ANTHROPIC_KEY to Script Properties in Apps Script project settings"};
-  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",tees:{Back:{slope:135,rating:72.6},Club:{slope:127,rating:69.9},Front:{slope:124,rating:67.8},Ladies:{slope:127,rating:69.5}},holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. For tees: only include tees visible on the card with their slope (55-155) and course rating. Use tee names Back/Club/Front/Ladies matching the card labels. Omit tees not on the card.'}]}]};
+  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",tees:{"TeeName":{slope:127,rating:69.9},...},holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. For tees: use the exact tee names printed on the card (e.g. Gold, Black, Blue, White, Red, Orange, Yellow). Include slope (55-155) and course rating for each tee visible on the card. Omit tees not shown.'}]}]};
   var res=UrlFetchApp.fetch("https://api.anthropic.com/v1/messages",{method:"post",contentType:"application/json",headers:{"x-api-key":key,"anthropic-version":"2023-06-01"},payload:JSON.stringify(payload),muteHttpExceptions:true});
   var j=JSON.parse(res.getContentText());
   if(j.error)return{error:j.error.message||JSON.stringify(j.error)};
@@ -923,7 +954,7 @@ async function extractCourseFromImage(file, gasUrl) {
 
 
 function CoursesPage({data,url,refresh,setData}){
-  const blank=()=>({name:"",location:"",tees:{Back:{slope:"",rating:""},Club:{slope:"113",rating:""},Front:{slope:"",rating:""},Ladies:{slope:"",rating:""}},holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
+  const blank=()=>({name:"",location:"",tees:{},holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const [form,setForm]=useState(blank());
@@ -931,7 +962,52 @@ function CoursesPage({data,url,refresh,setData}){
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState(null);
   const [dlg,setDlg]=useState(null);
+  const [searchBusy,setSearchBusy]=useState(false);
+  const [searchResults,setSearchResults]=useState(null);
+  const [liveQuery,setLiveQuery]=useState("");
+  const searchTimerRef=useRef(null);
   const imgRef=useRef();
+
+  const runSearch=async(name,location)=>{
+    if(!name||name.length<3||!url)return;
+    setSearchBusy(true);setSearchResults(null);
+    try{
+      const res=await apiPost(url,"searchCourses",{name:name.trim(),location:(location||"").trim()});
+      if(res.error){N("Search error: "+res.error,"error");}
+      else{
+        setSearchResults(res.courses||[]);
+        if(!res.courses?.length)N("No courses found — try a different name","warn");
+      }
+    }catch(e){N("Search failed: "+e.message,"error");}
+    setSearchBusy(false);
+  };
+
+  const onNameInput=(val)=>{
+    setForm(f=>({...f,name:val}));
+    setLiveQuery(val);
+    setSearchResults(null);
+    if(searchTimerRef.current)clearTimeout(searchTimerRef.current);
+    if(val.length>=3&&url){
+      searchTimerRef.current=setTimeout(()=>runSearch(val,form.location),600);
+    }
+  };
+
+  const applyCourseResult=(c)=>{
+    // Map API tees to our format
+    const tees={};
+    (c.tees||[]).forEach(t=>{
+      if(t.name&&t.slope)tees[t.name]={slope:String(t.slope),rating:String(t.rating||"")};
+    });
+    setForm(prev=>({
+      ...prev,
+      name:c.name||prev.name,
+      location:c.location||prev.location,
+      tees,
+      holes:c.holes?.length===18?c.holes.map(h=>({par:h.par||4,si:h.si||1})):prev.holes,
+    }));
+    setSearchResults(null);
+    N("Course data loaded — review and save","ok");
+  };
   const N=(t,tp="ok")=>{setMsg({t,tp});setTimeout(()=>setMsg(null),4500);};
   const uh=(i,k,v)=>{const h=[...form.holes];h[i]={...h[i],[k]:parseInt(v)||0};setForm({...form,holes:h});};
 
@@ -1010,12 +1086,14 @@ function CoursesPage({data,url,refresh,setData}){
     setBusy(false);
   };
 
-  const startEdit=(c)=>{
-    // Migrate legacy slopeRating/courseRating to Club tee
-    let tees=c.tees||{Back:{slope:"",rating:""},Club:{slope:"113",rating:""},Front:{slope:"",rating:""},Ladies:{slope:"",rating:""}};
-    if(!c.tees&&c.slopeRating){tees={...tees,Club:{slope:String(c.slopeRating),rating:String(c.courseRating||"")}};}
+  const startEdit=(c,autoSearch)=>{
+    let tees=c.tees||{};
+    if(!c.tees&&c.slopeRating){tees={Club:{slope:String(c.slopeRating),rating:String(c.courseRating||"")}};}
     setForm({name:c.name,location:c.location,tees,holes:c.holes.map(h=>({...h}))});
-    setEditId(c.id);setShowForm(true);
+    setEditId(c.id);setShowForm(true);setSearchResults(null);
+    if(autoSearch&&url&&c.name.length>=3){
+      setTimeout(()=>runSearch(c.name,c.location),300);
+    }
   };
 
   const del=(c)=>{
@@ -1068,30 +1146,72 @@ function CoursesPage({data,url,refresh,setData}){
               </button>
             </div>
           </div>
-          <div className="fg fg2" style={{marginBottom:12}}>
-            <div className="ff"><label>Course Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Royal Melbourne"/></div>
-            <div className="ff"><label>Location</label><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City, Country"/></div>
-          </div>
-          <div style={{marginBottom:16}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:6}}>
-              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Tee</div>
-              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Slope (55–155)</div>
-              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Course rating</div>
+          <div className="fg fg2" style={{marginBottom:8}}>
+            <div className="ff">
+              <label>Course Name {searchBusy&&<Spin/>}</label>
+              <input value={form.name} onChange={e=>onNameInput(e.target.value)} placeholder="Start typing to search…" autoComplete="off"/>
             </div>
-            {TEE_NAMES.map(tee=>(
-              <div key={tee} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,alignItems:"center",marginBottom:7}}>
+            <div className="ff"><label>Location <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:10}}>(optional, helps narrow search)</span></label>
+              <input value={form.location} onChange={e=>{setForm({...form,location:e.target.value});}} placeholder="City, Country"/>
+            </div>
+          </div>
+          {!url&&<div style={{marginBottom:10,fontSize:11,color:"var(--gray-400)"}}>Connect to Google Sheets to enable live search.</div>}
+          {searchResults&&searchResults.length>0&&(
+            <div style={{marginBottom:14,border:"1.5px solid var(--green-light)",borderRadius:8,overflow:"hidden"}}>
+              <div style={{padding:"7px 12px",background:"#e8f5e9",fontSize:11,fontWeight:700,color:"var(--green)"}}>Select a course to auto-populate</div>
+              {searchResults.map((c,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 12px",borderTop:"1px solid var(--gray-100)",cursor:"pointer",background:"white"}}
+                  onClick={()=>applyCourseResult(c)}>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13}}>{c.name}</div>
+                    <div style={{fontSize:11,color:"var(--gray-400)"}}>{c.location}{c.tees?.length?` · ${c.tees.length} tees`:""}</div>
+                  </div>
+                  <button className="btn btn-sm btn-primary" style={{flexShrink:0}}>Select →</button>
+                </div>
+              ))}
+              <div style={{padding:"6px 12px",borderTop:"1px solid var(--gray-100)"}}>
+                <button className="btn btn-ghost btn-sm" onClick={()=>setSearchResults(null)}>Dismiss</button>
+              </div>
+            </div>
+          )}
+          {searchResults&&searchResults.length===0&&(
+            <div style={{marginBottom:14,padding:"8px 12px",background:"#fff8e1",borderRadius:8,fontSize:12,color:"#8a6200"}}>
+              No courses found. Enter details manually or try a different search.
+            </div>
+          )}
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div className="section-title">Tees</div>
+              <button className="btn btn-ghost btn-sm" onClick={()=>{
+                const name=window.prompt("Tee name (e.g. Blue, White, Red):");
+                if(name&&name.trim())setForm({...form,tees:{...(form.tees||{}),[name.trim()]:{slope:"",rating:""}}});
+              }}>+ Add tee</button>
+            </div>
+            {Object.keys(form.tees||{}).length===0&&<p style={{fontSize:12,color:"var(--gray-400)",marginBottom:8}}>No tees added. Use Search to auto-populate, or add manually.</p>}
+            {Object.keys(form.tees||{}).length>0&&(
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr auto",gap:8,marginBottom:6}}>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Tee</div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Slope</div>
+                <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>CR</div>
+                <div></div>
+              </div>
+            )}
+            {Object.entries(form.tees||{}).map(([tee,val])=>(
+              <div key={tee} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr auto",gap:8,alignItems:"center",marginBottom:6}}>
                 <div style={{fontSize:13,fontWeight:600,color:"var(--green)"}}>{tee}</div>
                 <input type="number" min="55" max="155"
-                  value={(form.tees||{})[tee]?.slope||""}
-                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...((form.tees||{})[tee]||{}),slope:e.target.value}}})}
+                  value={val?.slope||""}
+                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...(val||{}),slope:e.target.value}}})}
                   placeholder="113"/>
                 <input type="number" step="0.1"
-                  value={(form.tees||{})[tee]?.rating||""}
-                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...((form.tees||{})[tee]||{}),rating:e.target.value}}})}
+                  value={val?.rating||""}
+                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...(val||{}),rating:e.target.value}}})}
                   placeholder={String(form.holes?.reduce((a,h)=>a+h.par,0)||72)}/>
+                <button className="btn btn-sm btn-danger" style={{padding:"2px 7px"}} onClick={()=>{
+                  const t={...(form.tees||{})};delete t[tee];setForm({...form,tees:t});
+                }}>✕</button>
               </div>
             ))}
-            <div style={{fontSize:11,color:"var(--gray-400)"}}>Leave slope/rating blank if tee not available at this course.</div>
           </div>
           {[0,9].map(s=>(
             <div key={s} style={{marginBottom:13}}>
@@ -1127,9 +1247,14 @@ function CoursesPage({data,url,refresh,setData}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
             <div>
               <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--green)"}}>{c.name}</div>
-              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}{c.tees?<span style={{marginLeft:6}}>· {Object.entries(c.tees).filter(([,v])=>v?.slope).map(([k,v])=>`${k} ${v.slope}/${v.rating||"?"}`).join(" · ")}</span>:c.slopeRating&&c.slopeRating!==113?<span style={{marginLeft:6}}>· Slope {c.slopeRating}</span>:""}</div>
+              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}{c.tees&&Object.keys(c.tees).length>0?<span style={{marginLeft:6}}>· {getCourseTeeNames(c).map(k=>`${k} ${c.tees[k].slope}/${c.tees[k].rating||"?"}`).join(" · ")}</span>:""}</div>
             </div>
-            <div style={{display:"flex",gap:6}}>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              {(!c.tees||Object.keys(c.tees).length===0)&&url&&(
+                <button className="btn btn-sm btn-primary" onClick={()=>startEdit(c,true)} title="Fetch tee data and full course info from API">
+                  ↻ Update from API
+                </button>
+              )}
               <button className="btn btn-sm btn-ghost" onClick={()=>startEdit(c)}>✏️ Edit</button>
               <button className="btn btn-sm btn-danger" onClick={()=>del(c)}>Delete</button>
             </div>
@@ -1321,7 +1446,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   const setPairF=(pid,k,v)=>updateT(t.id,x=>({...x,pairs:x.pairs.map(p=>p.id===pid?{...p,[k]:v}:p)}));
 
   const isRyder=(t.teamFormat||"modSF")==="ryder";
-  const getTournTee=(pid)=>(t.playerTees||{})[pid]||"Club";
+  const getTournTee=(pid)=>(t.playerTees||{})[pid]||getDefaultTee(course)||"";
   const setTournTee=(pid,tee)=>updateT(t.id,x=>({...x,playerTees:{...(x.playerTees||{}),[pid]:tee}}));
   const ryderTeamsReady=isRyder?t.teams.length>=2&&t.teams.every(tm=>(tm.playerIds||[]).length>=2):true;
   const validGroups=t.groups.filter(g=>g.playerIds?.length>0);
@@ -1515,7 +1640,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                       const teamFull=isRyder&&!inThis&&teamCount>=2;
                       const curTee=getTournTee(p.id);
                       const ch=courseHcp(p,course,curTee);
-                      const availTees=course?.tees?TEE_NAMES.filter(tn=>course.tees[tn]?.slope):["Club"];
+                      const availTees=getCourseTeeNames(course);
                       return(
                         <div key={p.id}>
                           <div className={"pchip"+(inThis?" on":(inOther||teamFull)?" disabled":"")}
@@ -2552,7 +2677,7 @@ function ScorecardPage({data,url,refresh}){
   const [rrPairs,setRrPairs]=useState([]);
   const [expandedPairs,setExpandedPairs]=useState(new Set());
   const [playerTees,setPlayerTees]=useState({}); // pid -> tee name
-  const getPlayerTee=(pid)=>playerTees[pid]||"Club";
+  const getPlayerTee=(pid)=>playerTees[pid]||getDefaultTee(course)||"";
   const setPlayerTee=(pid,tee)=>setPlayerTees(pt=>({...pt,[pid]:tee}));
   // Draft recovery
   const [draftDlg,setDraftDlg]=useState(()=>{
@@ -2827,7 +2952,7 @@ function ScorecardPage({data,url,refresh}){
             const inSel=!!sel.find(x=>x.id===p.id);
             const curTee=getPlayerTee(p.id);
             const ch=course?courseHcp(p,course,curTee):null;
-            const availTees=course?.tees?TEE_NAMES.filter(tn=>course.tees[tn]?.slope):["Club"];
+            const availTees=getCourseTeeNames(course);
             return(
               <div key={p.id}>
                 <div className={"pchip"+(inSel?" on":"")} onClick={()=>toggle(p)}>
