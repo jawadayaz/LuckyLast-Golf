@@ -317,11 +317,19 @@ async function apiPost(url,action,data){
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 function sa(hcp,si){const h=Math.round(hcp);return Math.floor(h/18)+(si<=(h%18)?1:0);}
-function courseHcp(player,course){
-  // WHS: Course Handicap = Index × (Slope ÷ 113) + (Course Rating − Par)
+const TEE_NAMES=["Back","Club","Front","Ladies"];
+function getTeeData(course,tee){
+  // New model: course.tees = {Back:{slope,rating}, Club:{...}, ...}
+  if(course?.tees){
+    const t=course.tees[tee||"Club"]||course.tees["Club"]||Object.values(course.tees).find(Boolean);
+    if(t)return{slope:parseFloat(t.slope)||113,rating:parseFloat(t.rating)||course?.par||72};
+  }
+  // Legacy: single slopeRating/courseRating
+  return{slope:parseFloat(course?.slopeRating)||113,rating:parseFloat(course?.courseRating)||course?.par||72};
+}
+function courseHcp(player,course,tee){
   const idx=parseFloat(player.handicap)||0;
-  const slope=parseFloat(course?.slopeRating)||113;
-  const rating=parseFloat(course?.courseRating)||course?.par||72;
+  const {slope,rating}=getTeeData(course,tee||player.tee||"Club");
   const par=course?.par||72;
   return Math.round(idx*(slope/113)+(rating-par));
 }
@@ -560,7 +568,7 @@ function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addP
 if(p.action==="saveTournaments")return cr(saveTournaments(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
 function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}return s;}
 function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
-function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating"]));}
+function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating","Tees"]));}
 function SS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i);return sheet("Scores",["ID","Date","CourseID","CourseName","PlayerID","PlayerName","Handicap","Tournament"].concat(h).concat(["Total","Stableford","ModStableford","StrokeNet","ModStroke"]));}
 function AS(){var s=sheet("Admins",["Email","Password"]);if(s.getLastRow()<=1)s.appendRow(["jawadayaz@gmail.com","luckylast"]);return s;}
 function getAll(){return{players:getPlayers(),courses:getCourses(),scores:getScores(),tournaments:getTournaments()};}
@@ -569,13 +577,13 @@ function getTournaments(){var s=TS(),r=s.getDataRange().getValues();if(r.length<
 function saveTournaments(data){var s=TS();if(s.getLastRow()<2)s.appendRow([JSON.stringify(data)]);else s.getRange(2,1).setValue(JSON.stringify(data));return{ok:true};}
 function getAdmins(){var r=AS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{email:r[0],password:r[1]};});}
 function getPlayers(){var r=PS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],name:r[1],email:r[2],handicap:parseFloat(r[3])||0};});}
-function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});var slope=parseFloat(r[40])||113;var cr=parseFloat(r[41])||parseInt(r[3])||72;return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,slopeRating:slope,courseRating:cr,holes:h};});}
+function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});var slope=parseFloat(r[40])||113;var cr=parseFloat(r[41])||parseInt(r[3])||72;var tees=null;try{if(r[42])tees=JSON.parse(r[42]);}catch(e){}return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,slopeRating:slope,courseRating:cr,tees:tees,holes:h};});}
 function getScores(){var r=SS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],date:r[1],courseId:r[2],courseName:r[3],playerId:r[4],playerName:r[5],handicap:r[6],tournament:r[7],scores:r.slice(8,26)};});}
 function addPlayer(p){PS().appendRow([Date.now(),p.name,p.email||"",p.handicap||0]);return{success:true};}
 function updatePlayer(p){var s=PS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(p.id)){if(p.name)s.getRange(i+1,2).setValue(p.name);s.getRange(i+1,4).setValue(p.handicap);return{success:true};}}return{success:false};}
 function deleteRow(n,id){var s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n);if(!s)return{success:false};var d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(id)){s.deleteRow(i+1);return{success:true};}}return{success:false};}
-function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h).concat([c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0)]));return{success:true};}
-function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});row.push(c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0));s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
+function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h).concat([c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0),c.tees?JSON.stringify(c.tees):""]));return{success:true};}
+function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});row.push(c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0),c.tees?JSON.stringify(c.tees):"");s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
 function addScores(pl){var s=SS();pl.forEach(function(sc){var t=sc.scores.reduce(function(a,v){return a+(parseInt(v)||0);},0);s.appendRow([Date.now(),sc.date,sc.courseId,sc.courseName,sc.playerId,sc.playerName,sc.handicap,sc.tournament||""].concat(sc.scores).concat([t,sc.stableford||"",sc.modStableford||"",sc.strokeNet||"",sc.modStroke||""]));});return{success:true};}
 function getScorecardResult(token){
   if(!token)return{error:"No token"};
@@ -588,7 +596,7 @@ function extractScorecard(d){
   // Set your Anthropic API key: Apps Script > Project Settings > Script properties > Add: ANTHROPIC_KEY = sk-ant-...
   var key=PropertiesService.getScriptProperties().getProperty("ANTHROPIC_KEY");
   if(!key)return{error:"Add ANTHROPIC_KEY to Script Properties in Apps Script project settings"};
-  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",slopeRating:113,courseRating:72.0,holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. Include slopeRating (55-155) and courseRating (decimal) if visible on the card, otherwise use 113 and total par respectively.'}]}]};
+  var payload={model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:d.mimeType,data:d.imageBase64}},{type:'text',text:'Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",tees:{Back:{slope:135,rating:72.6},Club:{slope:127,rating:69.9},Front:{slope:124,rating:67.8},Ladies:{slope:127,rating:69.5}},holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. For tees: only include tees visible on the card with their slope (55-155) and course rating. Use tee names Back/Club/Front/Ladies matching the card labels. Omit tees not on the card.'}]}]};
   var res=UrlFetchApp.fetch("https://api.anthropic.com/v1/messages",{method:"post",contentType:"application/json",headers:{"x-api-key":key,"anthropic-version":"2023-06-01"},payload:JSON.stringify(payload),muteHttpExceptions:true});
   var j=JSON.parse(res.getContentText());
   if(j.error)return{error:j.error.message||JSON.stringify(j.error)};
@@ -915,7 +923,7 @@ async function extractCourseFromImage(file, gasUrl) {
 
 
 function CoursesPage({data,url,refresh,setData}){
-  const blank=()=>({name:"",location:"",slopeRating:"113",courseRating:"",holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
+  const blank=()=>({name:"",location:"",tees:{Back:{slope:"",rating:""},Club:{slope:"113",rating:""},Front:{slope:"",rating:""},Ladies:{slope:"",rating:""}},holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const [form,setForm]=useState(blank());
@@ -986,15 +994,13 @@ function CoursesPage({data,url,refresh,setData}){
     setBusy(true);
     try{
       const par=form.holes.reduce((a,h)=>a+h.par,0);
-      const slope=parseFloat(form.slopeRating)||113;
-      const rating=parseFloat(form.courseRating)||par;
       if(editId){
-        const upd={...form,id:editId,par,slopeRating:slope,courseRating:rating};
+        const upd={...form,id:editId,par};
         if(url){await apiPost(url,"updateCourse",upd);await refresh();}
         else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
         N("Course updated ✓");
       }else{
-        const nc={id:Date.now(),...form,par,slopeRating:slope,courseRating:rating};
+        const nc={id:Date.now(),...form,par};
         if(url){await apiPost(url,"addCourse",nc);await refresh();}
         else setData(d=>({...d,courses:[...d.courses,nc]}));
         N("Course added ✓");
@@ -1004,7 +1010,13 @@ function CoursesPage({data,url,refresh,setData}){
     setBusy(false);
   };
 
-  const startEdit=(c)=>{setForm({name:c.name,location:c.location,slopeRating:String(c.slopeRating||113),courseRating:String(c.courseRating||""),holes:c.holes.map(h=>({...h}))});setEditId(c.id);setShowForm(true);};
+  const startEdit=(c)=>{
+    // Migrate legacy slopeRating/courseRating to Club tee
+    let tees=c.tees||{Back:{slope:"",rating:""},Club:{slope:"113",rating:""},Front:{slope:"",rating:""},Ladies:{slope:"",rating:""}};
+    if(!c.tees&&c.slopeRating){tees={...tees,Club:{slope:String(c.slopeRating),rating:String(c.courseRating||"")}};}
+    setForm({name:c.name,location:c.location,tees,holes:c.holes.map(h=>({...h}))});
+    setEditId(c.id);setShowForm(true);
+  };
 
   const del=(c)=>{
     setDlg({msg:"Delete \""+c.name+"\"?",detail:"This course will be permanently removed.",ok:async()=>{
@@ -1060,15 +1072,26 @@ function CoursesPage({data,url,refresh,setData}){
             <div className="ff"><label>Course Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Royal Melbourne"/></div>
             <div className="ff"><label>Location</label><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City, Country"/></div>
           </div>
-          <div className="fg fg2" style={{marginBottom:16}}>
-            <div className="ff">
-              <label>Slope Rating <span style={{fontWeight:400,color:"var(--gray-400)"}}>(55–155, standard 113)</span></label>
-              <input type="number" value={form.slopeRating||""} onChange={e=>setForm({...form,slopeRating:e.target.value})} placeholder="113"/>
+          <div style={{marginBottom:16}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:6}}>
+              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Tee</div>
+              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Slope (55–155)</div>
+              <div style={{fontSize:10,fontWeight:700,color:"var(--gray-600)",textTransform:"uppercase",letterSpacing:".5px"}}>Course rating</div>
             </div>
-            <div className="ff">
-              <label>Course Rating <span style={{fontWeight:400,color:"var(--gray-400)"}}>(e.g. 71.4)</span></label>
-              <input type="number" step="0.1" value={form.courseRating||""} onChange={e=>setForm({...form,courseRating:e.target.value})} placeholder={String(form.holes?.reduce((a,h)=>a+h.par,0)||72)}/>
-            </div>
+            {TEE_NAMES.map(tee=>(
+              <div key={tee} style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,alignItems:"center",marginBottom:7}}>
+                <div style={{fontSize:13,fontWeight:600,color:"var(--green)"}}>{tee}</div>
+                <input type="number" min="55" max="155"
+                  value={(form.tees||{})[tee]?.slope||""}
+                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...((form.tees||{})[tee]||{}),slope:e.target.value}}})}
+                  placeholder="113"/>
+                <input type="number" step="0.1"
+                  value={(form.tees||{})[tee]?.rating||""}
+                  onChange={e=>setForm({...form,tees:{...(form.tees||{}),[tee]:{...((form.tees||{})[tee]||{}),rating:e.target.value}}})}
+                  placeholder={String(form.holes?.reduce((a,h)=>a+h.par,0)||72)}/>
+              </div>
+            ))}
+            <div style={{fontSize:11,color:"var(--gray-400)"}}>Leave slope/rating blank if tee not available at this course.</div>
           </div>
           {[0,9].map(s=>(
             <div key={s} style={{marginBottom:13}}>
@@ -1104,7 +1127,7 @@ function CoursesPage({data,url,refresh,setData}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
             <div>
               <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--green)"}}>{c.name}</div>
-              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}{c.slopeRating&&c.slopeRating!==113?<span style={{marginLeft:6}}>· Slope {c.slopeRating}{c.courseRating&&c.courseRating!==c.par?" · CR "+c.courseRating:""}</span>:""}</div>
+              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}{c.tees?<span style={{marginLeft:6}}>· {Object.entries(c.tees).filter(([,v])=>v?.slope).map(([k,v])=>`${k} ${v.slope}/${v.rating||"?"}`).join(" · ")}</span>:c.slopeRating&&c.slopeRating!==113?<span style={{marginLeft:6}}>· Slope {c.slopeRating}</span>:""}</div>
             </div>
             <div style={{display:"flex",gap:6}}>
               <button className="btn btn-sm btn-ghost" onClick={()=>startEdit(c)}>✏️ Edit</button>
@@ -1176,7 +1199,7 @@ function TournamentPage({data,url,refresh}){
 
   const newT=()=>{
     const id=Date.now();
-    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],status:"setup"};
+    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],playerTees:{},status:"setup"};
     saveTourns([...tourns,t]);
     setTid(id);setView("setup");
   };
@@ -1298,6 +1321,8 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   const setPairF=(pid,k,v)=>updateT(t.id,x=>({...x,pairs:x.pairs.map(p=>p.id===pid?{...p,[k]:v}:p)}));
 
   const isRyder=(t.teamFormat||"modSF")==="ryder";
+  const getTournTee=(pid)=>(t.playerTees||{})[pid]||"Club";
+  const setTournTee=(pid,tee)=>updateT(t.id,x=>({...x,playerTees:{...(x.playerTees||{}),[pid]:tee}}));
   const ryderTeamsReady=isRyder?t.teams.length>=2&&t.teams.every(tm=>(tm.playerIds||[]).length>=2):true;
   const validGroups=t.groups.filter(g=>g.playerIds?.length>0);
   // Ryder: every group must have exactly 2 players from each team
@@ -1488,13 +1513,28 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                       const playerTeam=isRyder?t.teams.find(tm=>(tm.playerIds||[]).includes(p.id)):null;
                       const teamCount=isRyder&&playerTeam?(g.playerIds||[]).filter(pid=>(playerTeam.playerIds||[]).includes(pid)).length:0;
                       const teamFull=isRyder&&!inThis&&teamCount>=2;
+                      const curTee=getTournTee(p.id);
+                      const ch=courseHcp(p,course,curTee);
+                      const availTees=course?.tees?TEE_NAMES.filter(tn=>course.tees[tn]?.slope):["Club"];
                       return(
-                        <div key={p.id} className={"pchip"+(inThis?" on":(inOther||teamFull)?" disabled":"")}
-                          onClick={()=>toggleGroupP(g.id,p.id)} title={inOther?"In another group":teamFull?`${playerTeam.name} already has 2 in this group`:""}>
-                          <span>{inThis?"✓":(inOther||teamFull)?"✗":"○"}</span>
-                          <span style={{flex:1}}>{p.name}</span>
-                          {isRyder&&playerTeam&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:inThis?"rgba(255,255,255,0.3)":"var(--gray-100)",color:inThis?"white":"var(--gray-600)",marginRight:2}}>{playerTeam.name}</span>}
-                          <span className="hc">{p.handicap}</span>
+                        <div key={p.id}>
+                          <div className={"pchip"+(inThis?" on":(inOther||teamFull)?" disabled":"")}
+                            onClick={()=>toggleGroupP(g.id,p.id)} title={inOther?"In another group":teamFull?`${playerTeam.name} already has 2 in this group`:""}>
+                            <span>{inThis?"✓":(inOther||teamFull)?"✗":"○"}</span>
+                            <span style={{flex:1}}>{p.name}</span>
+                            {isRyder&&playerTeam&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:inThis?"rgba(255,255,255,0.3)":"var(--gray-100)",color:inThis?"white":"var(--gray-600)",marginRight:2}}>{playerTeam.name}</span>}
+                            <span style={{fontSize:10,color:"var(--gray-400)"}}>Idx {p.handicap}</span>
+                          </div>
+                          {inThis&&(
+                            <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 8px 5px",marginTop:-2}}>
+                              <select value={curTee} onChange={e=>setTournTee(p.id,e.target.value)}
+                                style={{fontSize:11,padding:"2px 4px",borderRadius:5,border:"0.5px solid var(--gray-200)",width:70}}
+                                onClick={e=>e.stopPropagation()}>
+                                {availTees.map(tn=><option key={tn} value={tn}>{tn}</option>)}
+                              </select>
+                              <span style={{fontSize:11,color:"var(--green)",fontWeight:600}}>CH {ch}</span>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1611,7 +1651,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         setSaving(false);return;
       }
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,(t.playerTees||{})[p.id]),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:t.name,scores:t.scores?.[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -1626,7 +1666,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         const pp1=data.players.find(p=>String(p.id)===String(pair.p1Id));
         const pp2=data.players.find(p=>String(p.id)===String(pair.p2Id));
         if(!pp1||!pp2)return;
-        const fch1=courseHcp(pp1,course),fch2=courseHcp(pp2,course);
+        const fch1=courseHcp(pp1,course,(t.playerTees||{})[pp1.id]),fch2=courseHcp(pp2,course,(t.playerTees||{})[pp2.id]);
         const pr=calcPair({p1:pp1,p2:pp2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1!=null?pair.hcp1:fch1,hcp2:pair.hcp2!=null?pair.hcp2:fch2},course,t.scores||{});
         if(!pr.winner)return; // tied — no adjustment
         const currentDiff=pr.hcpDiff;
@@ -1702,7 +1742,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
             <table className="dt">
               <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,(t.playerTees||{})[p.id]),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1748,7 +1788,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
             <table className="dt">
               <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,(t.playerTees||{})[p.id]),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1870,7 +1910,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
 
   const indivResults=useMemo(()=>{
     if(!course||!allPlayers.length)return[];
-    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,(t.playerTees||{})[p.id]),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
   },[allPlayers,t.scores,course]);
 
   const pairResults=useMemo(()=>{
@@ -1879,7 +1919,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
       const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
       const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
       if(!p1||!p2)return null;
-      const ch1=courseHcp(p1,course),ch2=courseHcp(p2,course);
+      const ch1=courseHcp(p1,course,(t.playerTees||{})[p1.id]),ch2=courseHcp(p2,course,(t.playerTees||{})[p2.id]);
       return calcPair({p1,p2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1!=null?pair.hcp1:ch1,hcp2:pair.hcp2!=null?pair.hcp2:ch2},course,t.scores||{});
     }).filter(Boolean);
   // eslint-disable-next-line
@@ -2158,7 +2198,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                         <table className="dt" style={{fontSize:12.5}}>
                           <thead><tr><th>Player</th><th>CH</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
                           <tbody>
-                            {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
+                            {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,(t.playerTees||{})[p.id]),scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
                               <tr key={r.playerId}>
                                 <td style={{fontWeight:600}}>{r.playerName}</td>
                                 <td>{r.handicap}</td>
@@ -2507,10 +2547,13 @@ function ScorecardPage({data,url,refresh}){
   const [teamB,setTeamB]=useState([]); // player ids
   const [teamsDone,setTeamsDone]=useState(false);
   const [hcOverrides,setHcOverrides]=useState({}); // pid -> override HC string
-  const hcFor=(p)=>{ const v=hcOverrides[p.id]; return v!=null&&v!==""?parseFloat(v)||p.handicap:p.handicap; };
+  const hcFor=(p)=>{ const v=hcOverrides[p.id]; return v!=null&&v!==""?parseFloat(v):courseHcp(p,course,getPlayerTee(p.id)); };
   // Ratha Ratha pairs
   const [rrPairs,setRrPairs]=useState([]);
   const [expandedPairs,setExpandedPairs]=useState(new Set());
+  const [playerTees,setPlayerTees]=useState({}); // pid -> tee name
+  const getPlayerTee=(pid)=>playerTees[pid]||"Club";
+  const setPlayerTee=(pid,tee)=>setPlayerTees(pt=>({...pt,[pid]:tee}));
   // Draft recovery
   const [draftDlg,setDraftDlg]=useState(()=>{
     const d=loadDraft();
@@ -2532,6 +2575,7 @@ function ScorecardPage({data,url,refresh}){
     if(d.teamsDone)setTeamsDone(d.teamsDone);
     if(d.hcOverrides)setHcOverrides(d.hcOverrides);
     if(d.rrPairs)setRrPairs(d.rrPairs);
+    if(d.playerTees)setPlayerTees(d.playerTees);
     setDraftDlg(null);
   };
   const discardDraft=()=>{clearDraft();setDraftDlg(null);};
@@ -2552,7 +2596,7 @@ function ScorecardPage({data,url,refresh}){
     if(done)return; // don't save after submit
     const hasAnyScore=Object.values(scores).some(a=>a.some(v=>parseInt(v)>0));
     if(hasAnyScore||sel.length>0){
-      saveDraft({cid,sel:sel.map(p=>p.id),scores,matchFmt,teamA,teamB,teamsDone,hcOverrides,rrPairs,savedAt:new Date().toISOString()});
+      saveDraft({cid,sel:sel.map(p=>p.id),scores,matchFmt,teamA,teamB,teamsDone,hcOverrides,rrPairs,playerTees,savedAt:new Date().toISOString()});
     }
   // eslint-disable-next-line
   },[cid,sel,scores,matchFmt,teamA,teamB,teamsDone,hcOverrides,rrPairs,done]);
@@ -2560,11 +2604,27 @@ function ScorecardPage({data,url,refresh}){
   const resetTeams=()=>{setTeamA([]);setTeamB([]);setTeamsDone(false);};
   const toggleTeam=(team,pid)=>{
     if(team==="A"){
-      if(teamA.includes(pid)){setTeamA(teamA.filter(id=>id!==pid));}
-      else{setTeamA([...teamA.filter(id=>!teamB.includes(id)||true),pid]);setTeamB(teamB.filter(id=>id!==pid));}
+      if(teamA.includes(pid)){
+        // Deselect from A — also remove auto-assigned B players
+        setTeamA(teamA.filter(id=>id!==pid));
+        setTeamB([]);  // clear auto-assigned B since A changed
+      } else {
+        if(teamA.length>=2)return N("Deselect a Team A player first","warn");
+        const newA=[...teamA,pid];
+        setTeamA(newA);
+        setTeamB(teamB.filter(id=>id!==pid));
+        // Auto-assign remaining selected players to Team B
+        if(newA.length===2){
+          const remaining=sel.map(p=>p.id).filter(id=>!newA.includes(id));
+          setTeamB(remaining);
+        }
+      }
     } else {
       if(teamB.includes(pid)){setTeamB(teamB.filter(id=>id!==pid));}
-      else{setTeamB([...teamB,pid]);setTeamA(teamA.filter(id=>id!==pid));}
+      else{
+        if(teamB.length>=2)return N("Deselect a Team B player first","warn");
+        setTeamB([...teamB,pid]);setTeamA(teamA.filter(id=>id!==pid));
+      }
     }
   };
 
@@ -2576,7 +2636,7 @@ function ScorecardPage({data,url,refresh}){
   // Computed results
   const selResults=useMemo(()=>{
     if(!course||!sel.length)return[];
-    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:scores[p.id]||Array(18).fill(0)})),course);
+    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,getPlayerTee(p.id)),scores:scores[p.id]||Array(18).fill(0)})),course);
   },[sel,scores,course]);
 
   const tAPlayers=sel.filter(p=>teamA.includes(p.id)).map(p=>({...p,handicap:hcFor(p)}));
@@ -2678,7 +2738,7 @@ function ScorecardPage({data,url,refresh}){
     setBusy(true);
     try{
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course),scores:scores[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:courseHcp(p,course,getPlayerTee(p.id)),scores:scores[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -2763,12 +2823,30 @@ function ScorecardPage({data,url,refresh}){
         <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
         {!course&&<div className="alert alert-warn" style={{marginBottom:8}}>Select a course above before adding players.</div>}
         <div className="psel" style={{marginBottom:16,opacity:course?1:0.4,pointerEvents:course?"auto":"none"}}>
-          {data.players.map(p=>(
-            <div key={p.id} className={"pchip"+(sel.find(x=>x.id===p.id)?" on":"")} onClick={()=>toggle(p)}>
-              <span>{sel.find(x=>x.id===p.id)?"✓":"○"}</span>
-              <span style={{flex:1}}>{p.name}</span><span className="hc">Idx {p.handicap}</span>
-            </div>
-          ))}
+          {data.players.map(p=>{
+            const inSel=!!sel.find(x=>x.id===p.id);
+            const curTee=getPlayerTee(p.id);
+            const ch=course?courseHcp(p,course,curTee):null;
+            const availTees=course?.tees?TEE_NAMES.filter(tn=>course.tees[tn]?.slope):["Club"];
+            return(
+              <div key={p.id}>
+                <div className={"pchip"+(inSel?" on":"")} onClick={()=>toggle(p)}>
+                  <span>{inSel?"✓":"○"}</span>
+                  <span style={{flex:1}}>{p.name}</span>
+                  <span style={{fontSize:10,color:"var(--gray-400)"}}>Idx {p.handicap}</span>
+                </div>
+                {inSel&&course&&(
+                  <div style={{display:"flex",alignItems:"center",gap:6,padding:"3px 8px 5px",marginTop:-2}}>
+                    <select value={curTee} onChange={e=>{e.stopPropagation();setPlayerTee(p.id,e.target.value);}}
+                      style={{fontSize:11,padding:"2px 4px",borderRadius:5,border:"0.5px solid var(--gray-200)",width:70}}>
+                      {availTees.map(tn=><option key={tn} value={tn}>{tn}</option>)}
+                    </select>
+                    <span style={{fontSize:11,color:"var(--green)",fontWeight:600}}>CH {ch}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Match format */}
@@ -2962,7 +3040,7 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);setHcOverrides({});clearDraft();}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);setHcOverrides({});setPlayerTees({});clearDraft();}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
