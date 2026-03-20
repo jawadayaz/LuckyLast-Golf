@@ -982,13 +982,13 @@ function CoursesPage({data,url,refresh,setData}){
     setSearchBusy(false);
   };
 
+  const locationRef=useRef("");
   const onNameInput=(val)=>{
     setForm(f=>({...f,name:val}));
-    setLiveQuery(val);
     setSearchResults(null);
     if(searchTimerRef.current)clearTimeout(searchTimerRef.current);
     if(val.length>=3&&url){
-      searchTimerRef.current=setTimeout(()=>runSearch(val,form.location),600);
+      searchTimerRef.current=setTimeout(()=>runSearch(val,locationRef.current),600);
     }
   };
 
@@ -1090,6 +1090,7 @@ function CoursesPage({data,url,refresh,setData}){
     let tees=c.tees||{};
     if(!c.tees&&c.slopeRating){tees={Club:{slope:String(c.slopeRating),rating:String(c.courseRating||"")}};}
     setForm({name:c.name,location:c.location,tees,holes:c.holes.map(h=>({...h}))});
+    locationRef.current=c.location||"";
     setEditId(c.id);setShowForm(true);setSearchResults(null);
     if(autoSearch&&url&&c.name.length>=3){
       setTimeout(()=>runSearch(c.name,c.location),300);
@@ -1152,7 +1153,7 @@ function CoursesPage({data,url,refresh,setData}){
               <input value={form.name} onChange={e=>onNameInput(e.target.value)} placeholder="Start typing to search…" autoComplete="off"/>
             </div>
             <div className="ff"><label>Location <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:10}}>(optional, helps narrow search)</span></label>
-              <input value={form.location} onChange={e=>{setForm({...form,location:e.target.value});}} placeholder="City, Country"/>
+              <input value={form.location} onChange={e=>{setForm({...form,location:e.target.value});locationRef.current=e.target.value;}} placeholder="City, Country"/>
             </div>
           </div>
           {!url&&<div style={{marginBottom:10,fontSize:11,color:"var(--gray-400)"}}>Connect to Google Sheets to enable live search.</div>}
