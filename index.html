@@ -315,50 +315,9 @@ async function apiPost(url,action,data){
   await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action,data})});
   await new Promise(r=>setTimeout(r,2000));
 }
-async function apiPostRead(url,action,data){
-  // POST that can read the response — GAS must return CORS headers
-  // Falls back to cache-based JSONP if direct read fails
-  const token="_r"+Date.now();
-  try{
-    const r=await fetch(url,{method:"POST",body:JSON.stringify({action,data,token})});
-    const txt=await r.text();
-    const j=JSON.parse(txt);
-    if(j&&!j.error)return j;
-  }catch(e){}
-  // Fallback: poll cache via JSONP GET
-  await new Promise(r=>setTimeout(r,1500));
-  return await jsonpGet(url,"getSearchResult&token="+token);
-}
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 function sa(hcp,si){const h=Math.round(hcp);return Math.floor(h/18)+(si<=(h%18)?1:0);}
-function getCourseTeeNames(course){
-  if(course?.tees&&Object.keys(course.tees).length>0){
-    return Object.keys(course.tees).filter(k=>course.tees[k]?.slope);
-  }
-  return[];
-}
-function getDefaultTee(course){
-  const names=getCourseTeeNames(course);
-  if(!names.length)return"";
-  // Prefer a middle tee — skip first (hardest) and last (easiest) if 3+ tees
-  if(names.length>=3)return names[Math.floor(names.length/2)];
-  return names[0];
-}
-function getTeeData(course,tee){
-  if(course?.tees){
-    const t=course.tees[tee]||(tee?null:null)||Object.values(course.tees).find(v=>v?.slope);
-    if(t)return{slope:parseFloat(t.slope)||113,rating:parseFloat(t.rating)||course?.par||72};
-  }
-  return{slope:parseFloat(course?.slopeRating)||113,rating:parseFloat(course?.courseRating)||course?.par||72};
-}
-function courseHcp(player,course,tee){
-  const idx=parseFloat(player.handicap)||0;
-  const effectiveTee=tee||(course?getDefaultTee(course):"");
-  const {slope,rating}=getTeeData(course,effectiveTee);
-  const par=course?.par||72;
-  return Math.round(idx*(slope/113)+(rating-par));
-}
 function sfPts(gross,par,allow){return Math.max(0,par-(gross-allow)+2);}
 function calcFormats(players,course){
   return players.map(({playerId,playerName,handicap,scores:sc})=>{
@@ -509,7 +468,7 @@ function Alrt({type,msg,onClose}){
 }
 function Spin({dark}){return <span className={"spinner"+(dark?" spinner-dark":"")}/>;}
 
-function ScorecardGrid({course,players,scores,setScore,locked,showMsf,showCourseHcp}){
+function ScorecardGrid({course,players,scores,setScore,locked,showMsf}){
   const cls=(g,p)=>{if(!g||!p)return"";const d=parseInt(g)-p;return d<=-2?"eagle":d===-1?"birdie":d===0?"par":d===1?"bogey":d===2?"double":"triple";};
   const t9=(pid,s)=>(scores[pid]||[]).slice(s,s+9).reduce((a,v)=>a+(parseInt(v)||0),0);
   if(!players.length)return null;
@@ -544,15 +503,14 @@ function ScorecardGrid({course,players,scores,setScore,locked,showMsf,showCourse
           </tr>
           {players.map(p=>{
             const ps=scores[p.id]||Array(18).fill("");
-            const chcp=courseHcp(p,course);
-            const al=course.holes.map(h=>sa(chcp,h.si));
+            const al=course.holes.map(h=>sa(p.handicap,h.si));
             const tot=ps.reduce((a,v)=>a+(parseInt(v)||0),0);
-            const hc75=Math.round(chcp*0.75);
+            const hc75=Math.round(p.handicap*0.75);
             const msf=showMsf?course.holes.reduce((acc,h,i)=>{const g=parseInt(ps[i])||0;if(!g)return acc;return acc+sfPts(g,h.par,sa(hc75,h.si));},0):null;
             return <tr key={p.id}>
               <td style={{textAlign:"left",paddingLeft:9}}>
                 <div style={{fontWeight:700,fontSize:12}}>{p.name}</div>
-                <div style={{fontSize:10,color:"var(--gray-400)"}}>Idx {p.handicap}{showCourseHcp&&chcp!==Math.round(p.handicap)?<span style={{marginLeft:4,color:"var(--green-light)"}}>→ CH {chcp}</span>:""}</div>
+                <div style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</div>
               </td>
               {course.holes.slice(0,9).map((h,i)=>(
                 <td key={i}>
@@ -589,13 +547,12 @@ const GAS=`// Lucky Last Golfers — Google Apps Script
 // Web app | Execute as: Me | Who has access: Anyone
 
 function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
-function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;Logger.log("doGet action="+a+" params="+JSON.stringify(e.parameter));try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="ping")return cr({ok:true,version:"v3-cacheSearch",time:new Date().toISOString()},cb);if(a==="getSearchResult"){var tok=e.parameter.token||"";var cached=CacheService.getScriptCache().get(tok);return cr(cached?JSON.parse(cached):{error:"No result yet"},cb);}if(a==="searchCourses"){Logger.log("searchCourses called name="+e.parameter.name);var sr=searchCourses({name:e.parameter.name||"",location:e.parameter.location||""});Logger.log("searchCourses result="+JSON.stringify(sr).slice(0,200));return cr(sr,cb);}Logger.log("Unknown action: "+a);return cr({error:"Unknown: "+a},cb);}catch(err){Logger.log("doGet error: "+err.toString());return cr({error:err.toString()},cb);}}
+function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="searchCourses")return cr(searchCourses({name:e.parameter.name||"",location:e.parameter.location||""}),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
 function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
-if(p.action==="saveTournaments")return cr(saveTournaments(p.data));
-if(p.action==="searchCourses"){var sr2=searchCourses(p.data);if(p.token)CacheService.getScriptCache().put(p.token,JSON.stringify(sr2),60);return cr(sr2);}if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
-function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}else{var cur=s.getLastColumn();if(cur<h.length){var missing=h.slice(cur);s.getRange(1,cur+1,1,missing.length).setValues([missing]).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}}return s;}
+if(p.action==="saveTournaments")return cr(saveTournaments(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
+function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}return s;}
 function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
-function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating","Tees"]));}
+function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h));}
 function SS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i);return sheet("Scores",["ID","Date","CourseID","CourseName","PlayerID","PlayerName","Handicap","Tournament"].concat(h).concat(["Total","Stableford","ModStableford","StrokeNet","ModStroke"]));}
 function AS(){var s=sheet("Admins",["Email","Password"]);if(s.getLastRow()<=1)s.appendRow(["jawadayaz@gmail.com","luckylast"]);return s;}
 function getAll(){return{players:getPlayers(),courses:getCourses(),scores:getScores(),tournaments:getTournaments()};}
@@ -604,13 +561,13 @@ function getTournaments(){var s=TS(),r=s.getDataRange().getValues();if(r.length<
 function saveTournaments(data){var s=TS();if(s.getLastRow()<2)s.appendRow([JSON.stringify(data)]);else s.getRange(2,1).setValue(JSON.stringify(data));return{ok:true};}
 function getAdmins(){var r=AS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{email:r[0],password:r[1]};});}
 function getPlayers(){var r=PS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],name:r[1],email:r[2],handicap:parseFloat(r[3])||0};});}
-function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});var slope=parseFloat(r[40])||113;var cr=parseFloat(r[41])||parseInt(r[3])||72;var tees=null;try{if(r[42])tees=JSON.parse(r[42]);}catch(e){}return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,slopeRating:slope,courseRating:cr,tees:tees,holes:h};});}
+function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,holes:h};});}
 function getScores(){var r=SS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],date:r[1],courseId:r[2],courseName:r[3],playerId:r[4],playerName:r[5],handicap:r[6],tournament:r[7],scores:r.slice(8,26)};});}
 function addPlayer(p){PS().appendRow([Date.now(),p.name,p.email||"",p.handicap||0]);return{success:true};}
 function updatePlayer(p){var s=PS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(p.id)){if(p.name)s.getRange(i+1,2).setValue(p.name);s.getRange(i+1,4).setValue(p.handicap);return{success:true};}}return{success:false};}
 function deleteRow(n,id){var s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n);if(!s)return{success:false};var d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(id)){s.deleteRow(i+1);return{success:true};}}return{success:false};}
-function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h).concat([c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0),c.tees?JSON.stringify(c.tees):""]));return{success:true};}
-function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});row.push(c.slopeRating||113,c.courseRating||c.holes.reduce(function(a,x){return a+x.par;},0),c.tees?JSON.stringify(c.tees):"");s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
+function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h));return{success:true};}
+function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
 function addScores(pl){var s=SS();pl.forEach(function(sc){var t=sc.scores.reduce(function(a,v){return a+(parseInt(v)||0);},0);s.appendRow([Date.now(),sc.date,sc.courseId,sc.courseName,sc.playerId,sc.playerName,sc.handicap,sc.tournament||""].concat(sc.scores).concat([t,sc.stableford||"",sc.modStableford||"",sc.strokeNet||"",sc.modStroke||""]));});return{success:true};}
 function getScorecardResult(token){
   if(!token)return{error:"No token"};
@@ -619,15 +576,67 @@ function getScorecardResult(token){
   if(!val)return{error:"Result not ready — try waiting a few more seconds and refreshing"};
   try{return JSON.parse(val);}catch(e){return{error:"Parse error: "+e};}
 }
-function testFetch(){
-  var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
-  Logger.log("key: "+key);
-  var res=UrlFetchApp.fetch("https://api.golfcourseapi.com/v1/search?search_query=prestige",{
-    method:"get",headers:{"Authorization":"Key "+key},muteHttpExceptions:true
-  });
-  Logger.log("status: "+res.getResponseCode());
-  Logger.log("body: "+res.getContentText().slice(0,200));
+function extractScorecard(d){
+  // Set your Gemini API key: Apps Script > Project Settings > Script properties > Add: GEMINI_KEY = ...
+  var key=PropertiesService.getScriptProperties().getProperty("GEMINI_KEY");
+  if(!key)return{error:"Add GEMINI_KEY to Script Properties in Apps Script project settings"};
+  var prompt='Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",tees:{"TeeName":{slope:127,rating:69.9},...},holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. For tees: use exact tee names printed on card (e.g. Gold, Black, Blue, White, Red). Include slope (55-155) and course rating per tee. Omit tees not shown.';
+  var payload={contents:[{parts:[{inline_data:{mime_type:d.mimeType,data:d.imageBase64}},{text:prompt}]}],generationConfig:{temperature:0,maxOutputTokens:1024}};
+  var res=UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+key,{method:"post",contentType:"application/json",payload:JSON.stringify(payload),muteHttpExceptions:true});
+  var j=JSON.parse(res.getContentText());
+  if(j.error)return{error:j.error.message||JSON.stringify(j.error)};
+  var txt=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts&&j.candidates[0].content.parts[0]&&j.candidates[0].content.parts[0].text)||"";
+  var BT=String.fromCharCode(96);var clean=txt.split(BT+BT+BT+"json").join("").split(BT+BT+BT).join("").trim();var m=clean.match(/[{][\s\S]*[}]/);
+  if(!m)return{error:"Could not parse response: "+txt.slice(0,100)};
+  try{return JSON.parse(m[0]);}catch(e){return{error:"JSON parse error: "+e.toString()};}
+}}// Lucky Last Golfers — Google Apps Script
+// Extensions → Apps Script → paste all → Save → Deploy → New deployment
+// Web app | Execute as: Me | Who has access: Anyone
+
+function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
+function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);return cr({error:"Unknown: "+a},cb);}catch(err){return cr({error:err.toString()},cb);}}
+function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
+if(p.action==="saveTournaments")return cr(saveTournaments(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
+function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}return s;}
+function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
+function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h));}
+function SS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i);return sheet("Scores",["ID","Date","CourseID","CourseName","PlayerID","PlayerName","Handicap","Tournament"].concat(h).concat(["Total","Stableford","ModStableford","StrokeNet","ModStroke"]));}
+function AS(){var s=sheet("Admins",["Email","Password"]);if(s.getLastRow()<=1)s.appendRow(["jawadayaz@gmail.com","luckylast"]);return s;}
+function getAll(){return{players:getPlayers(),courses:getCourses(),scores:getScores(),tournaments:getTournaments()};}
+function TS(){return sheet("Tournaments",["Data"]);}
+function getTournaments(){var s=TS(),r=s.getDataRange().getValues();if(r.length<=1||!r[1][0])return[];try{return JSON.parse(r[1][0]);}catch(e){return[];}}
+function saveTournaments(data){var s=TS();if(s.getLastRow()<2)s.appendRow([JSON.stringify(data)]);else s.getRange(2,1).setValue(JSON.stringify(data));return{ok:true};}
+function getAdmins(){var r=AS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{email:r[0],password:r[1]};});}
+function getPlayers(){var r=PS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],name:r[1],email:r[2],handicap:parseFloat(r[3])||0};});}
+function getCourses(){var r=CS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){var h=[];for(var i=0;i<18;i++)h.push({par:parseInt(r[4+i*2])||4,si:parseInt(r[5+i*2])||(i+1)});return{id:r[0],name:r[1],location:r[2],par:parseInt(r[3])||72,holes:h};});}
+function getScores(){var r=SS().getDataRange().getValues();return r.length<=1?[]:r.slice(1).map(function(r){return{id:r[0],date:r[1],courseId:r[2],courseName:r[3],playerId:r[4],playerName:r[5],handicap:r[6],tournament:r[7],scores:r.slice(8,26)};});}
+function addPlayer(p){PS().appendRow([Date.now(),p.name,p.email||"",p.handicap||0]);return{success:true};}
+function updatePlayer(p){var s=PS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(p.id)){if(p.name)s.getRange(i+1,2).setValue(p.name);s.getRange(i+1,4).setValue(p.handicap);return{success:true};}}return{success:false};}
+function deleteRow(n,id){var s=SpreadsheetApp.getActiveSpreadsheet().getSheetByName(n);if(!s)return{success:false};var d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(id)){s.deleteRow(i+1);return{success:true};}}return{success:false};}
+function addCourse(c){var h=[];c.holes.forEach(function(x){h.push(x.par,x.si);});CS().appendRow([Date.now(),c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)].concat(h));return{success:true};}
+function updateCourse(c){var s=CS(),d=s.getDataRange().getValues();for(var i=1;i<d.length;i++){if(String(d[i][0])===String(c.id)){var row=[c.id,c.name,c.location||"",c.holes.reduce(function(a,x){return a+x.par;},0)];c.holes.forEach(function(x){row.push(x.par,x.si);});s.getRange(i+1,1,1,row.length).setValues([row]);return{success:true};}}return{success:false};}
+function addScores(pl){var s=SS();pl.forEach(function(sc){var t=sc.scores.reduce(function(a,v){return a+(parseInt(v)||0);},0);s.appendRow([Date.now(),sc.date,sc.courseId,sc.courseName,sc.playerId,sc.playerName,sc.handicap,sc.tournament||""].concat(sc.scores).concat([t,sc.stableford||"",sc.modStableford||"",sc.strokeNet||"",sc.modStroke||""]));});return{success:true};}
+function getScorecardResult(token){
+  if(!token)return{error:"No token"};
+  var cache=CacheService.getScriptCache();
+  var val=cache.get(token);
+  if(!val)return{error:"Result not ready — try waiting a few more seconds and refreshing"};
+  try{return JSON.parse(val);}catch(e){return{error:"Parse error: "+e};}
 }
+function extractScorecard(d){
+  // Set your Gemini API key: Apps Script > Project Settings > Script properties > Add: GEMINI_KEY = ...
+  var key=PropertiesService.getScriptProperties().getProperty("GEMINI_KEY");
+  if(!key)return{error:"Add GEMINI_KEY to Script Properties in Apps Script project settings"};
+  var prompt='Extract golf scorecard. Return ONLY valid JSON, no markdown: {name:"CourseName",location:"City",tees:{"TeeName":{slope:127,rating:69.9},...},holes:[{par:4,si:1},...total 18 holes]}. Exactly 18 holes, par values 3 or 4 or 5 only, si values unique integers 1 through 18. For tees: use exact tee names printed on card (e.g. Gold, Black, Blue, White, Red). Include slope (55-155) and course rating per tee. Omit tees not shown.';
+  var payload={contents:[{parts:[{inline_data:{mime_type:d.mimeType,data:d.imageBase64}},{text:prompt}]}],generationConfig:{temperature:0,maxOutputTokens:1024}};
+  var res=UrlFetchApp.fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key="+key,{method:"post",contentType:"application/json",payload:JSON.stringify(payload),muteHttpExceptions:true});
+  var j=JSON.parse(res.getContentText());
+  if(j.error)return{error:j.error.message||JSON.stringify(j.error)};
+  var txt=(j.candidates&&j.candidates[0]&&j.candidates[0].content&&j.candidates[0].content.parts&&j.candidates[0].content.parts[0]&&j.candidates[0].content.parts[0].text)||"";
+  var BT=String.fromCharCode(96);var clean=txt.split(BT+BT+BT+"json").join("").split(BT+BT+BT).join("").trim();var m=clean.match(/[{][\s\S]*[}]/);
+  if(!m)return{error:"Could not parse response: "+txt.slice(0,100)};
+  try{return JSON.parse(m[0]);}catch(e){return{error:"JSON parse error: "+e.toString()};}
+}}
 function searchCourses(d){
   var key=PropertiesService.getScriptProperties().getProperty("GOLF_COURSE_API_KEY");
   if(!key)return{error:"Add GOLF_COURSE_API_KEY to Script Properties"};
@@ -637,30 +646,2577 @@ function searchCourses(d){
   });
   var j=JSON.parse(res.getContentText());
   if(j.error)return{error:j.error};
-  var courses=(j.courses||[]).slice(0,6).map(function(c){
+  var courses=(j.courses||[]).slice(0,8).map(function(c){
     var loc=c.location||{};
     var locStr=(loc.city||"")+(loc.state?", "+loc.state:"")+(loc.country?", "+loc.country:"");
+    // Fetch full course detail
     var detail=null;
     try{
       var dr=UrlFetchApp.fetch("https://api.golfcourseapi.com/v1/courses/"+c.id,{
         method:"get",headers:{"Authorization":"Key "+key},muteHttpExceptions:true
       });
-      detail=JSON.parse(dr.getContentText());
-      Logger.log("detail for "+c.id+": "+JSON.stringify(detail).slice(0,300));
+      var dj=JSON.parse(dr.getContentText());
+      detail=dj.course||dj; // API wraps in {course: ...}
     }catch(e){Logger.log("detail error: "+e);}
     var src=detail||c;
+    // tees: {male:[{tee_name,slope_rating,course_rating,holes:[{par,handicap}]}], female:[...]}
     var tees={};
-    var teeSrc=src.tees||{};
-    if(Array.isArray(teeSrc)){
-      teeSrc.forEach(function(t){var n=t.tee_name||t.name||t.label;if(n&&(t.slope_rating||t.slope))tees[n]={slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};});
-    } else if(typeof teeSrc==="object"){
-      Object.keys(teeSrc).forEach(function(k){var t=teeSrc[k];if(t&&(t.slope_rating||t.slope))tees[k]={slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};});
-    }
     var holes=[];
-    var holeSrc=src.holes||[];
-    for(var i=0;i<holeSrc.length;i++){var h=holeSrc[i];holes.push({par:parseInt(h.par)||4,si:parseInt(h.handicap||h.stroke_index||h.si||h.handicap_index)||i+1});}
-    return{id:c.id,name:c.club_name||c.course_name||c.name,location:locStr,tees:tees,holes:holes.length===18?holes:[]};
+    var genders=["male","female"];
+    genders.forEach(function(g){
+      var arr=src.tees&&src.tees[g];
+      if(!Array.isArray(arr))return;
+      arr.forEach(function(t){
+        var n=t.tee_name;
+        if(!n)return;
+        // Suffix female tees to avoid collision e.g. "Blue (F)"
+        var key2=(g==="female"&&src.tees.male&&src.tees.male.some(function(m){return m.tee_name===n;}))?n+" (F)":n;
+        tees[key2]={slope:t.slope_rating,rating:t.course_rating};
+        // Use male tee holes (first tee with 18 holes) for the course hole data
+        if(holes.length===0&&g==="male"&&Array.isArray(t.holes)&&t.holes.length>=18){
+          holes=t.holes.slice(0,18).map(function(h,i){return{par:parseInt(h.par)||4,si:parseInt(h.handicap)||i+1};});
+        }
+      });
+    });
+    return{id:c.id,name:c.club_name||c.course_name||c.name,location:locStr,tees:tees,holes:holes};
   });
   return{courses:courses};
+}`;
+
+// ── Login Modal ───────────────────────────────────────────────────────────────
+// ── Confirm Dialog Component ──────────────────────────────────────────────────
+function ConfirmDialog({msg,detail,okLabel="Delete",okClass="",danger=true,onOk,onCancel}){
+  // Close on backdrop click
+  const onBd=(e)=>{if(e.target===e.currentTarget)onCancel();};
+  return(
+    <div className="cdlg-backdrop" onClick={onBd}>
+      <div className="cdlg">
+        <div className={"cdlg-icon "+(danger?"danger":"warn")}>
+          {danger?"🗑️":"⚠️"}
+        </div>
+        <div className="cdlg-title">{msg}</div>
+        {detail&&<div className="cdlg-msg">{detail}</div>}
+        <div className="cdlg-btns">
+          <button className="cdlg-cancel" onClick={onCancel}>Cancel</button>
+          <button className={"cdlg-ok "+(okClass||"")} onClick={onOk}>{okLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
 }
->
+
+function LoginModal({onLogin,onCancel}){
+  const [email,setEmail]=useState("");
+  const [pass,setPass]=useState("");
+  const [err,setErr]=useState("");
+  const [busy,setBusy]=useState(false);
+
+  const doLogin=async()=>{
+    if(!email||!pass)return setErr("Email and password required");
+    setBusy(true);setErr("");
+    // Hardcoded fallback admin
+    if(email==="jawadayaz@gmail.com"&&pass==="luckylast"){onLogin(email);return;}
+    setErr("Invalid credentials");setBusy(false);
+  };
+
+  return(
+    <div className="modal-overlay">
+      <div className="modal" style={{maxWidth:380,textAlign:"center"}}>
+        <img src={LOGO_SRC} alt="Lucky Last Golfers" style={{width:76,height:76,borderRadius:"50%",objectFit:"cover",border:"3px solid var(--gold-light)",marginBottom:12}}/>
+        <div className="modal-title" style={{marginBottom:4}}>Admin Login</div>
+        <p style={{fontSize:12.5,color:"var(--gray-400)",marginBottom:18}}>Setup requires administrator access</p>
+        {err&&<Alrt type="error" msg={err}/>}
+        <div className="fg" style={{gap:11,textAlign:"left"}}>
+          <div className="ff"><label>Email</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doLogin()} placeholder="admin@email.com" autoFocus/></div>
+          <div className="ff"><label>Password</label><input type="password" value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doLogin()}/></div>
+        </div>
+        <div className="btn-row" style={{marginTop:16,justifyContent:"center"}}>
+          <button className="btn btn-primary" style={{minWidth:110}} onClick={doLogin} disabled={busy}>{busy?<><Spin/>Checking…</>:"Login"}</button>
+          {onCancel&&<button className="btn btn-ghost" onClick={onCancel}>Cancel</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Setup Page ────────────────────────────────────────────────────────────────
+function SetupPage({url,setUrl,onTest,status,admin,onLogout}){
+  const [local,setLocal]=useState(url||"");
+  const [copied,setCopied]=useState(false);
+  const [diag,setDiag]=useState(null);
+  const [diagBusy,setDiagBusy]=useState(false);
+
+  const save=()=>{const t=local.trim();setUrl(t);localStorage.setItem(LS_URL,t);localStorage.removeItem("llg_connected");onTest(t);};
+  const shareUrl=url?window.location.origin+window.location.pathname+"#url="+encodeURIComponent(url):null;
+  const copyShareLink=()=>{if(shareUrl)navigator.clipboard.writeText(shareUrl).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});};
+  const copy=()=>{navigator.clipboard.writeText(GAS).then(()=>{setCopied(true);setTimeout(()=>setCopied(false),2500);});};
+
+  const runDiag=async()=>{
+    if(!local.trim())return;
+    setDiagBusy(true);setDiag(null);
+    const steps=[];
+    const ok1=local.includes("script.google.com/macros/s/")&&local.includes("/exec");
+    steps.push({ok:ok1,label:"URL format",detail:ok1?"Looks correct":"Expected .../macros/s/.../exec"});
+    if(ok1){
+      try{
+        const r=await fetch(local+"?action=getAll",{redirect:"follow"});
+        const txt=await r.text();let p=null;try{p=JSON.parse(txt);}catch(_){}
+        const ok=r.ok&&p&&!p.error;
+        steps.push({ok,label:"HTTP "+r.status,detail:ok?"✓ Got: "+Object.keys(p).join(", "):(p?.error||txt.slice(0,100))});
+      }catch(e){steps.push({ok:false,label:"Fetch",detail:e.message});}
+    }
+    setDiag(steps);setDiagBusy(false);
+  };
+
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left"><h2>Setup</h2><p>Logged in as {admin}</p></div>
+        <button className="btn btn-ghost btn-sm" onClick={onLogout}>Logout</button>
+      </div>
+      <div className="card">
+        <div className="card-title">Google Sheets Connection</div>
+        {status==="ok"&&<Alrt type="ok" msg="✓ Connected and syncing"/>}
+        {status==="err"&&<Alrt type="error" msg="✗ Connection failed — run diagnostic"/>}
+        {status==="busy"&&<Alrt type="warn" msg="Testing connection…"/>}
+        {status==="none"&&<Alrt type="info" msg="Paste your deployed Web App URL below"/>}
+        <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+          <div className="ff" style={{flex:1}}><label>Web App URL</label>
+            <input value={local} onChange={e=>setLocal(e.target.value)} placeholder="https://script.google.com/macros/s/…/exec"/>
+          </div>
+          <button className="btn btn-primary" style={{marginBottom:1}} onClick={save} disabled={!local.trim()||status==="busy"}>{status==="busy"?<><Spin/>Testing…</>:"Save & Connect"}</button>
+        </div>
+        <div style={{marginTop:13,paddingTop:12,borderTop:"1px solid var(--gray-100)",display:"flex",gap:9,alignItems:"center",flexWrap:"wrap"}}>
+          <button className="btn btn-ghost btn-sm" onClick={runDiag} disabled={!local.trim()||diagBusy}>{diagBusy?<><Spin dark/>Running…</>:"🔍 Run Diagnostic"}</button>
+        </div>
+        {shareUrl&&status==="ok"&&(
+          <div style={{marginTop:10,padding:"10px 12px",background:"var(--gray-50)",borderRadius:8,border:"1px solid var(--gray-200)"}}>
+            <div style={{fontSize:11,fontWeight:600,color:"var(--gray-600)",marginBottom:6}}>📱 SHARE WITH OTHER DEVICES</div>
+            <div style={{fontSize:11.5,color:"var(--gray-800)",marginBottom:8,lineHeight:1.5}}>Anyone who opens this link will be auto-connected — no setup required.</div>
+            <div style={{display:"flex",gap:7,alignItems:"center"}}>
+              <div style={{flex:1,fontSize:10.5,color:"var(--gray-600)",background:"white",border:"1px solid var(--gray-200)",borderRadius:6,padding:"5px 8px",wordBreak:"break-all",fontFamily:"monospace"}}>{shareUrl}</div>
+              <button className="btn btn-primary btn-sm" style={{flexShrink:0}} onClick={copyShareLink}>{copied?"✓ Copied":"Copy Link"}</button>
+            </div>
+          </div>
+        )}
+        {diag&&(
+          <div style={{marginTop:11,background:"var(--gray-50)",borderRadius:8,padding:11,fontSize:12,fontFamily:"monospace"}}>
+            {diag.map((s,i)=>(
+              <div key={i} style={{display:"flex",gap:7,marginBottom:i<diag.length-1?8:0}}>
+                <span>{s.ok?"✅":"❌"}</span>
+                <div><div style={{fontWeight:700,color:s.ok?"#2e7d32":"var(--red)"}}>{s.label}</div><div style={{color:"var(--gray-600)"}}>{s.detail}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="card">
+        <div className="card-title">Apps Script Setup Guide</div>
+        <div className="setup-step"><div className="step-num">1</div><div className="step-body">
+          <div className="step-title">Create a Google Sheet</div>
+          <div className="step-desc">Go to <strong>sheets.google.com</strong> and create a blank spreadsheet. The script will auto-create Players, Courses, Scores, and Admins tabs.</div>
+          <a href="https://sheets.google.com" target="_blank"><button className="btn btn-ghost btn-sm">Open Google Sheets ↗</button></a>
+        </div></div>
+        <div className="setup-step"><div className="step-num">2</div><div className="step-body">
+          <div className="step-title">Add the script</div>
+          <div className="step-desc"><strong>Extensions → Apps Script</strong> → delete all existing code → paste the code below → Save (Ctrl+S).</div>
+          <div style={{position:"relative"}}>
+            <div className="code-block">{GAS}</div>
+            <button className="btn btn-sm" style={{position:"absolute",top:7,right:7,background:copied?"#52b788":"#333",color:"white",fontSize:11}} onClick={copy}>{copied?"✓ Copied!":"📋 Copy"}</button>
+          </div>
+        </div></div>
+        <div className="setup-step"><div className="step-num">3</div><div className="step-body">
+          <div className="step-title">Deploy as Web App</div>
+          <div className="step-desc"><strong>Deploy → New deployment</strong> → Type: Web app → Execute as: <strong>Me</strong> → Who has access: <strong>Anyone</strong> → Deploy → Authorise → Copy URL → Paste above.</div>
+          <div className="warn-box">⚠️ Always use <strong>New deployment</strong> after code edits. "Not verified" warning is normal — click Advanced → Go to (unsafe).</div>
+        </div></div>
+        <div className="setup-step"><div className="step-num">4</div><div className="step-body">
+          <div className="step-title">Enable Scorecard Image Scanning <span className="badge b-gold" style={{marginLeft:6,fontSize:10}}>Optional</span></div>
+          <div className="step-desc">To scan scorecard photos, add your Gemini API key to the script:<br/>Apps Script → Project Settings (⚙️) → <strong>Script properties</strong> → Add property:<br/><code style={{background:"var(--gray-100)",padding:"2px 6px",borderRadius:4,fontSize:12}}>GEMINI_KEY</code> = your key from <a href="https://aistudio.google.com/apikey" target="_blank" style={{color:"var(--blue)"}}>aistudio.google.com/apikey</a></div>
+          <div style={{fontSize:12,color:"var(--gray-400)",marginTop:4}}>Get an API key at <a href="https://console.anthropic.com" target="_blank" style={{color:"var(--blue)"}}>console.anthropic.com</a>. Without this, use the quick-load buttons for Bengaluru courses.</div>
+        </div></div>
+      </div>
+    </div>
+  );
+}
+
+// ── Players Page ──────────────────────────────────────────────────────────────
+function PlayersPage({data,url,refresh,setData}){
+  const [form,setForm]=useState({name:"",email:"",handicap:""});
+  const [editId,setEditId]=useState(null);
+  const [editHcp,setEditHcp]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const [dlg,setDlg]=useState(null);
+  const N=(t,tp="ok")=>{setMsg({t,tp});setTimeout(()=>setMsg(null),3500);};
+
+  const add=async()=>{
+    if(!form.name.trim())return N("Name is required","error");
+    setBusy(true);
+    try{
+      const p={id:Date.now(),name:form.name.trim(),email:form.email.trim(),handicap:parseFloat(form.handicap)||0};
+      if(url){await apiPost(url,"addPlayer",p);await refresh();}
+      else setData(d=>({...d,players:[...d.players,p]}));
+      N("Player added ✓");setForm({name:"",email:"",handicap:""});
+    }catch(e){N("Error: "+e.message,"error");}
+    setBusy(false);
+  };
+
+  const saveHcp=async(p)=>{
+    setBusy(true);
+    try{
+      const hcp=parseFloat(editHcp)||0;
+      if(url){await apiPost(url,"updatePlayer",{id:p.id,handicap:hcp,name:p.name});await refresh();}
+      else setData(d=>({...d,players:d.players.map(x=>x.id===p.id?{...x,handicap:hcp}:x)}));
+      N("HC updated ✓");setEditId(null);
+    }catch(e){N("Error: "+e.message,"error");}
+    setBusy(false);
+  };
+
+  const del=(p)=>{
+    setDlg({msg:"Delete "+p.name+"?",detail:"This player will be permanently removed from the roster.",ok:async()=>{
+      setDlg(null);setBusy(true);
+      try{
+        if(url){await apiPost(url,"deletePlayer",{id:p.id});await refresh();}
+        else setData(d=>({...d,players:d.players.filter(x=>x.id!==p.id)}));
+        N("Deleted ✓");
+      }catch(e){N("Error: "+e.message,"error");}
+      setBusy(false);
+    }});
+  };
+
+  return(
+    <div>
+      <div className="ph"><div className="ph-left"><h2>Players</h2><p>Manage the Lucky Last roster</p></div></div>
+      {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+      <div className="card">
+        <div className="card-title">Add Player</div>
+        <div className="fg fg3">
+          <div className="ff"><label>Name</label><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Full Name"/></div>
+          <div className="ff"><label>Email</label><input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="email@example.com"/></div>
+          <div className="ff"><label>Handicap</label><input type="text" inputMode="decimal" value={form.handicap} onChange={e=>setForm({...form,handicap:e.target.value.replace(/[^0-9.]/g,"")})} placeholder="0"/></div>
+        </div>
+        <div className="btn-row">
+          <button className="btn btn-primary" onClick={add} disabled={busy}>{busy?<><Spin/>Adding…</>:"Add Player"}</button>
+          <button className="btn btn-ghost btn-sm" onClick={refresh}>↻ Refresh</button>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-title">Roster ({data.players.length} players)</div>
+        {!data.players.length?<p style={{fontSize:13,color:"var(--gray-400)"}}>No players yet — add some above.</p>:(
+          <table className="dt">
+            <thead><tr><th>#</th><th>Name</th><th>Email</th><th>HC</th><th></th></tr></thead>
+            <tbody>
+              {data.players.map((p,i)=>(
+                <tr key={p.id}>
+                  <td style={{width:32,color:"var(--gray-400)"}}>{i+1}</td>
+                  <td style={{fontWeight:600}}>{p.name}</td>
+                  <td style={{fontSize:12.5}}>{p.email}</td>
+                  <td style={{width:100}}>
+                    {editId===p.id
+                      ?<div style={{display:"flex",gap:5,alignItems:"center"}}>
+                          <input type="text" inputMode="decimal" value={editHcp} onChange={e=>setEditHcp(e.target.value.replace(/[^0-9.]/g,""))} autoFocus style={{width:58,padding:"3px 7px",border:"1.5px solid var(--green-light)",borderRadius:6,fontWeight:700}} onKeyDown={e=>e.key==="Enter"&&saveHcp(p)}/>
+                          <button className="btn btn-sm btn-primary" onClick={()=>saveHcp(p)}>✓</button>
+                          <button className="btn btn-sm btn-ghost" onClick={()=>setEditId(null)}>✕</button>
+                        </div>
+                      :<span className="badge b-green" style={{cursor:"pointer",userSelect:"none"}} onClick={()=>{setEditId(p.id);setEditHcp(String(parseFloat(p.handicap)||0));}} title="Click to edit">{parseFloat(p.handicap)||0}</span>
+                    }
+                  </td>
+                  <td style={{width:90}}>
+                    <div style={{display:"flex",gap:5}}>
+                      <button className="btn btn-sm btn-danger" onClick={()=>del(p)}>Del</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {dlg&&<ConfirmDialog msg={dlg.msg} detail={dlg.detail} onOk={dlg.ok} onCancel={()=>setDlg(null)}/>}
+    </div>
+  );
+}
+
+// ── Courses Page ──────────────────────────────────────────────────────────────
+// ── Course image extraction ──────────────────────────────────────────────────
+// Image scanning is proxied through Google Apps Script to avoid CORS issues.
+// The GAS function extractScorecard() calls the Anthropic API server-side.
+// Requires ANTHROPIC_KEY set in Script Properties (Project Settings).
+async function extractCourseFromImage(file, gasUrl) {
+  if (!gasUrl) {
+    throw new Error("Connect to Google Sheets first (Setup tab) to enable scorecard scanning.");
+  }
+
+  // Read file as base64
+  const b64 = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = e => res(e.target.result.split(",")[1]);
+    r.onerror = () => rej(new Error("Could not read file"));
+    r.readAsDataURL(file);
+  });
+
+  const mt = file.type || "image/jpeg";
+  const token = "sc_" + Date.now();
+
+  // Step 1: POST image to GAS (fire-and-forget, no-cors)
+  await fetch(gasUrl, {
+    method: "POST",
+    mode: "no-cors",
+    body: JSON.stringify({ action: "extractScorecard", data: { imageBase64: b64, mimeType: mt, token } })
+  });
+
+  // Small wait for GAS to process
+  await new Promise(r => setTimeout(r, 6000));
+
+  // Step 2: Poll for result via JSONP GET
+  const result = await new Promise((resolve, reject) => {
+    const cb = "_sc" + Date.now();
+    const el = document.createElement("script");
+    let done = false;
+    const cleanup = () => { if(done) return; done=true; clearTimeout(t); delete window[cb]; el.parentNode && el.parentNode.removeChild(el); };
+    const t = setTimeout(() => { cleanup(); reject(new Error("Timed out — GAS may still be processing. Update your Apps Script with the latest code from Setup and redeploy.")); }, 20000);
+    window[cb] = (d) => { cleanup(); d && d.error ? reject(new Error(d.error)) : resolve(d); };
+    el.onerror = () => { cleanup(); reject(new Error("Could not reach Apps Script.")); };
+    el.src = gasUrl + "?action=getScorecardResult&token=" + token + "&callback=" + cb;
+    document.head.appendChild(el);
+  });
+
+  if (!result || !result.holes || result.holes.length !== 18) {
+    throw new Error("Could not extract scorecard data. Try a clearer photo or enter manually.");
+  }
+
+  // Normalise SI values
+  const used = new Set();
+  result.holes = result.holes.map(h => {
+    let si = h.si;
+    if (used.has(si) || si < 1 || si > 18) { for(let n=1;n<=18;n++){if(!used.has(n)){si=n;break;}} }
+    used.add(si);
+    return { par: h.par, si };
+  });
+
+  return result;
+}
+
+
+function CoursesPage({data,url,refresh,setData}){
+  const blank=()=>({name:"",location:"",holes:Array.from({length:18},(_,i)=>({par:4,si:i+1}))});
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [form,setForm]=useState(blank());
+  const [imgBusy,setImgBusy]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const [dlg,setDlg]=useState(null);
+  const imgRef=useRef();
+  const N=(t,tp="ok")=>{setMsg({t,tp});setTimeout(()=>setMsg(null),4500);};
+  const uh=(i,k,v)=>{const h=[...form.holes];h[i]={...h[i],[k]:parseInt(v)||0};setForm({...form,holes:h});};
+
+  const onImage=async(e)=>{
+    const f=e.target.files?.[0];if(!f)return;
+    setImgBusy(true);
+    try{
+      const p=await extractCourseFromImage(f, url);
+      setForm(prev=>({...prev,name:p.name||prev.name,location:p.location||prev.location,holes:p.holes}));
+      N("✓ Scorecard read successfully — review and edit if needed","ok");
+    }catch(err){
+      N(err.message,"warn");
+    }
+    setImgBusy(false);e.target.value="";
+  };
+
+  const KNOWN_COURSES=[
+    {
+      name:"Karnataka Golf Association",
+      location:"Bengaluru, Karnataka, India",
+      holes:[
+        {par:4,si:17},{par:4,si:11},{par:4,si:9},{par:3,si:15},{par:5,si:7},
+        {par:4,si:5},{par:4,si:3},{par:3,si:13},{par:5,si:1},
+        {par:4,si:14},{par:5,si:8},{par:4,si:10},{par:3,si:16},{par:5,si:4},
+        {par:3,si:18},{par:4,si:2},{par:4,si:12},{par:4,si:6},
+      ]
+    },
+    {
+      name:"Bangalore Golf Club",
+      location:"Bengaluru, Karnataka, India",
+      holes:[
+        {par:4,si:3},{par:4,si:7},{par:4,si:9},{par:5,si:1},{par:3,si:15},
+        {par:4,si:11},{par:3,si:17},{par:5,si:5},{par:3,si:13},
+        {par:3,si:18},{par:4,si:2},{par:4,si:8},{par:3,si:16},{par:4,si:6},
+        {par:4,si:12},{par:4,si:14},{par:5,si:4},{par:4,si:10},
+      ]
+    },
+    {
+      name:"Prestige Golfshire",
+      location:"Nandi Hills, Bengaluru, Karnataka, India",
+      holes:[
+        {par:4,si:3},{par:3,si:17},{par:5,si:1},{par:4,si:5},{par:5,si:9},
+        {par:3,si:15},{par:4,si:11},{par:4,si:13},{par:4,si:7},
+        {par:4,si:10},{par:4,si:8},{par:4,si:18},{par:5,si:2},{par:4,si:6},
+        {par:3,si:14},{par:5,si:4},{par:3,si:12},{par:4,si:16},
+      ]
+    },
+  ];
+  const loadKnown=(c)=>{
+    setForm({name:c.name,location:c.location,holes:c.holes.map(h=>({...h}))});
+    setShowKnown(false);
+    N("✓ "+c.name+" loaded"+(c.note?" — ⚠️ "+c.note:"")+" — verify and save","ok");
+  };
+
+  const save=async()=>{
+    if(!form.name.trim())return N("Course name required","error");
+    const nm=form.name.trim().toLowerCase();
+    const dup=data.courses.find(c=>c.name.trim().toLowerCase()===nm&&String(c.id)!==String(editId));
+    if(dup)return N("A course named \""+dup.name+"\" already exists","error");
+    setBusy(true);
+    try{
+      const par=form.holes.reduce((a,h)=>a+h.par,0);
+      if(editId){
+        const upd={...form,id:editId,par};
+        if(url){await apiPost(url,"updateCourse",upd);await refresh();}
+        else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
+        N("Course updated ✓");
+      }else{
+        const nc={id:Date.now(),...form,par};
+        if(url){await apiPost(url,"addCourse",nc);await refresh();}
+        else setData(d=>({...d,courses:[...d.courses,nc]}));
+        N("Course added ✓");
+      }
+      setShowForm(false);setEditId(null);setForm(blank());
+    }catch(e){N("Error: "+e.message,"error");}
+    setBusy(false);
+  };
+
+  const [searchBusy,setSearchBusy]=useState(false);
+  const [searchResults,setSearchResults]=useState(null);
+
+  const runSearch=async(name,location)=>{
+    if(!name||name.length<3)return;
+    if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
+    setSearchBusy(true);setSearchResults(null);
+    try{
+      const action="searchCourses&name="+encodeURIComponent(name.trim())+"&location="+encodeURIComponent((location||"").trim());
+      const res=await jsonpGet(url,action);
+      if(res.error){N("Search error: "+res.error,"error");}
+      else{setSearchResults(res.courses||[]);if(!res.courses?.length)N("No courses found — try a different name","warn");}
+    }catch(e){N("Search failed: "+e.message,"error");}
+    setSearchBusy(false);
+  };
+
+  const startEdit=(c,autoSearch)=>{
+    let tees=c.tees||{};
+    if(!c.tees&&c.slopeRating){tees={Club:{slope:String(c.slopeRating),rating:String(c.courseRating||"")}};}
+    setForm({name:c.name,location:c.location,tees,holes:c.holes.map(h=>({...h}))});
+    setEditId(c.id);setShowForm(true);setSearchResults(null);
+    if(autoSearch&&url&&c.name.length>=3)setTimeout(()=>runSearch(c.name,c.location),400);
+  };
+
+  const del=(c)=>{
+    setDlg({msg:"Delete \""+c.name+"\"?",detail:"This course will be permanently removed.",ok:async()=>{
+      setDlg(null);setBusy(true);
+      try{
+        if(url){await apiPost(url,"deleteCourse",{id:c.id});await refresh();}
+        else setData(d=>({...d,courses:d.courses.filter(x=>String(x.id)!==String(c.id))}));
+        N("Deleted ✓");
+      }catch(e){N("Error: "+e.message,"error");}
+      setBusy(false);
+    }});
+  };
+
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left"><h2>Courses</h2><p>Add via scorecard image or manually</p></div>
+        <button className="btn btn-primary" onClick={()=>{setShowForm(!showForm);setEditId(null);setForm(blank());}}>{showForm&&!editId?"Cancel":"+ Add Course"}</button>
+      </div>
+      {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+
+      {showForm&&(
+        <div className="card">
+          <div className="card-title">{editId?"Edit Course":"New Course"}</div>
+          <div style={{background:"var(--gray-50)",border:"1px solid var(--gray-200)",borderRadius:9,padding:"13px 15px",marginBottom:16}}>
+            <div style={{fontWeight:700,fontSize:13,color:"var(--green)",marginBottom:10}}>Quick Add — Known Bengaluru Courses</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+              {KNOWN_COURSES.map(c=>(
+                <button key={c.name} className="btn btn-ghost btn-sm" style={{border:"1.5px solid var(--green)",color:"var(--green)"}}
+                  onClick={()=>loadKnown(c)} title={c.note||""}>
+                  ⛳ {c.name}{c.note&&<span style={{fontSize:9,marginLeft:4,opacity:.7}}>*SI est.</span>}
+                </button>
+              ))}
+            </div>
+            <div style={{borderTop:"1px solid var(--gray-200)",paddingTop:11}}>
+              <div style={{fontWeight:700,fontSize:12.5,color:"var(--gray-600)",marginBottom:6}}>
+                📷 Import from Scorecard Image
+                <span style={{fontWeight:400,fontSize:11.5,color:"var(--gray-400)",marginLeft:6}}>— requires Google Sheet connection</span>
+              </div>
+              <div style={{fontSize:12,color:"var(--gray-600)",marginBottom:8,lineHeight:1.55}}>
+                {url
+                  ?"Upload a scorecard photo and par/SI data will be extracted via your Google Apps Script."
+                  :<span style={{color:"#8a6200"}}>⚠️ Connect to Google Sheets first (Setup tab) to enable image scanning.</span>
+                }
+              </div>
+              <input ref={imgRef} type="file" accept="image/*" style={{display:"none"}} onChange={onImage}/>
+              <button className="btn btn-blue btn-sm" onClick={()=>imgRef.current.click()} disabled={imgBusy||!url} title={!url?"Connect to Google Sheets first":""}>
+                {imgBusy?<><Spin/>Reading image…</>:"📷 Upload Scorecard Image"}
+              </button>
+            </div>
+          </div>
+          <div className="fg fg2" style={{marginBottom:8}}>
+            <div className="ff"><label>Course Name {searchBusy&&<Spin/>}</label><input value={form.name} onChange={e=>{setForm({...form,name:e.target.value});if(e.target.value.length>=3)runSearch(e.target.value,form.location);else setSearchResults(null);}} placeholder="e.g. Royal Melbourne"/></div>
+            <div className="ff"><label>Location</label><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} placeholder="City, Country"/></div>
+          </div>
+          {searchResults&&searchResults.length>0&&(
+            <div style={{background:"var(--surface-2)",borderRadius:8,marginBottom:12,border:"1px solid var(--border)"}}>
+              <div style={{padding:"6px 12px",fontSize:11,color:"var(--text-muted)",borderBottom:"1px solid var(--border)"}}>Select to fill name & location:</div>
+              {searchResults.map((c,i)=>(
+                <div key={i} onClick={()=>{
+                  setForm(f=>({
+                    ...f,
+                    name:c.name,
+                    location:c.location,
+                    ...(c.tees&&Object.keys(c.tees).length?{tees:Object.fromEntries(Object.entries(c.tees).map(([k,v])=>([k,{slope:String(v.slope||""),rating:String(v.rating||"")}])))}:{}),
+                    ...(c.holes&&c.holes.length===18?{holes:c.holes}:{}),
+                  }));
+                  setSearchResults(null);
+                  N(c.holes&&c.holes.length===18?"Course data loaded — review tees and save":"Name and location filled — add tees/holes manually","ok");
+                }} style={{padding:"8px 12px",cursor:"pointer",borderBottom:i<searchResults.length-1?"1px solid var(--border)":"none",fontSize:13}} onMouseEnter={e=>e.currentTarget.style.background="var(--surface-3)"} onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <strong>{c.name}</strong>{c.location&&<span style={{color:"var(--text-muted)",marginLeft:6}}>{c.location}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {[0,9].map(s=>(
+            <div key={s} style={{marginBottom:13}}>
+              <div className="hl">{s===0?"Front 9  (Holes 1–9)":"Back 9  (Holes 10–18)"}</div>
+              <div className="hg">
+                {form.holes.slice(s,s+9).map((h,i)=>(
+                  <div key={i} className="hc2">
+                    <label>H{s+i+1}</label>
+                    <input value={h.par} onChange={e=>uh(s+i,"par",e.target.value)} style={{marginBottom:3}}/>
+                    <label style={{marginTop:2}}>SI</label>
+                    <input value={h.si} onChange={e=>uh(s+i,"si",e.target.value)}/>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="btn-row">
+            <button className="btn btn-primary" onClick={save} disabled={busy}>{busy?<><Spin/>Saving…</>:(editId?"Update Course":"Save Course")}</button>
+            <button className="btn btn-ghost" onClick={()=>{setShowForm(false);setEditId(null);}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!data.courses.length&&!showForm&&(
+        <div className="card" style={{textAlign:"center",padding:"30px 20px",color:"var(--gray-400)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>⛳</div>
+          <div style={{fontSize:13}}>No courses yet — add one above or import from a scorecard photo</div>
+        </div>
+      )}
+
+      {data.courses.map(c=>(
+        <div key={c.id} className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+            <div>
+              <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--green)"}}>{c.name}</div>
+              <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}</div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button className="btn btn-sm btn-ghost" onClick={()=>startEdit(c)}>✏️ Edit</button>
+              {(!c.tees||!Object.keys(c.tees).length)&&<button className="btn btn-sm btn-ghost" onClick={()=>{startEdit(c,true);}} title="Search API for course data" style={{fontSize:11}}>↻ API</button>}
+              <button className="btn btn-sm btn-danger" onClick={()=>del(c)}>Delete</button>
+            </div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table className="sct" style={{minWidth:640}}>
+              <thead><tr>
+                <th style={{textAlign:"left",padding:"5px 9px"}}>Hole</th>
+                {c.holes.slice(0,9).map((_,i)=><th key={i}>{i+1}</th>)}<th>OUT</th>
+                {c.holes.slice(9).map((_,i)=><th key={i}>{i+10}</th>)}<th>IN</th><th>TOT</th>
+              </tr></thead>
+              <tbody>
+                <tr className="pr"><td style={{textAlign:"left",paddingLeft:9,fontWeight:700}}>Par</td>
+                  {c.holes.slice(0,9).map((h,i)=><td key={i}>{h.par}</td>)}<td>{c.holes.slice(0,9).reduce((a,h)=>a+h.par,0)}</td>
+                  {c.holes.slice(9).map((h,i)=><td key={i}>{h.par}</td>)}<td>{c.holes.slice(9).reduce((a,h)=>a+h.par,0)}</td><td>{c.par}</td>
+                </tr>
+                <tr className="sr"><td style={{textAlign:"left",paddingLeft:9}}>SI</td>
+                  {c.holes.map((h,i)=><td key={i}>{h.si}</td>)}
+                  <td colSpan={3} style={{color:"var(--gray-400)"}}>—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+      {dlg&&<ConfirmDialog msg={dlg.msg} detail={dlg.detail} onOk={dlg.ok} onCancel={()=>setDlg(null)}/>}
+    </div>
+  );
+}
+
+// ── Tournament: constants & helpers ──────────────────────────────────────────
+const TCOLS=["#e8f5e9","#e3f2fd","#fff8e1","#f3e5f5","#fce4ec","#e0f7fa","#fff3e0","#f1f8e9"];
+const TBORD=["#52b788","#1565c0","#d4a017","#6a1b9a","#c2185b","#00838f","#e65100","#558b2f"];
+
+// ── Tournament List ───────────────────────────────────────────────────────────
+function TournamentPage({data,url,refresh}){
+  const [tourns,setTourns]=useState(()=>{
+    // Merge: GAS tournaments take priority if available, fallback to localStorage
+    try{const s=localStorage.getItem(LS_TOURNS);return s?JSON.parse(s):[];}catch{return[];}
+  });
+  const [delTourn,setDelTourn]=useState(null);
+  const [view,setView]=useState("list"); // list | setup | scoring | results
+  const [tid,setTid]=useState(null);
+
+  // Sync from GAS data whenever it loads
+  useEffect(()=>{
+    if(Array.isArray(data.tournaments)){
+      setTourns(data.tournaments);
+      localStorage.setItem(LS_TOURNS,JSON.stringify(data.tournaments));
+    }
+  },[data.tournaments]);
+
+  const syncTimerRef=useRef(null);
+  const saveTourns=(ts)=>{
+    setTourns(ts);
+    localStorage.setItem(LS_TOURNS,JSON.stringify(ts));
+    // Debounce GAS sync — wait 1.5s after last change before pushing
+    if(url){
+      if(syncTimerRef.current)clearTimeout(syncTimerRef.current);
+      syncTimerRef.current=setTimeout(()=>{
+        apiPost(url,"saveTournaments",ts).catch(()=>{});
+      },1500);
+    }
+  };
+  const updateT=(id,fn)=>saveTourns(tourns.map(t=>t.id===id?fn(t):t));
+  const getT=(id)=>tourns.find(t=>t.id===id);
+
+  const newT=()=>{
+    const id=Date.now();
+    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],status:"setup"};
+    saveTourns([...tourns,t]);
+    setTid(id);setView("setup");
+  };
+
+  if(view!=="list"){
+    const t=getT(tid);
+    const course=t&&data.courses.find(c=>String(c.id)===String(t.courseId));
+    if(!t||!course)return(
+      <div><button className="btn btn-ghost" style={{marginBottom:14}} onClick={()=>setView("list")}>← Back</button>
+        <div className="card"><p>Tournament or course not found.</p></div></div>
+    );
+    if(view==="setup")return <TournSetup t={t} course={course} data={data} updateT={updateT} onBack={()=>setView("list")} onStart={()=>{updateT(tid,x=>({...x,status:"scoring"}));setView("scoring");}}/>;
+    if(view==="scoring")return <TournScoring t={t} course={course} data={data} updateT={updateT} url={url} refresh={refresh} onBack={()=>setView("list")} onGoResults={()=>setView("results")} onSetup={()=>setView("setup")}/>;
+    if(view==="results")return <TournResults t={t} course={course} data={data} updateT={updateT} url={url} refresh={refresh} onBack={()=>setView("list")} onScoring={()=>setView("scoring")}/>;
+  }
+
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left"><h2>Tournaments</h2><p>{tourns.length} tournament{tourns.length!==1?"s":""} saved locally</p></div>
+        <button className="btn btn-primary" onClick={newT} disabled={!data.courses.length}>{!data.courses.length?"Add a course first":"+ New Tournament"}</button>
+      </div>
+      {!tourns.length&&(
+        <div className="card" style={{textAlign:"center",padding:"30px 20px",color:"var(--gray-400)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>🏆</div>
+          <div style={{fontSize:13}}>No tournaments yet</div>
+        </div>
+      )}
+      {[...tourns].reverse().map(t=>{
+        const c=data.courses.find(x=>String(x.id)===String(t.courseId));
+        const allDone=t.groups?.length&&t.groups.every(g=>t.lockedCards?.includes(g.id));
+        return(
+          <div key={t.id} className="card" style={{padding:"14px 16px"}}>
+            {/* Row 1: name + status badge + del */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
+              <div style={{flex:1,minWidth:0,marginRight:8}}>
+                <div style={{fontFamily:"Playfair Display,serif",fontSize:17,fontWeight:700,color:"var(--green)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {t.name||"Unnamed Tournament"}
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                  {t.status==="scoring"&&!allDone&&<span style={{fontSize:11,fontWeight:600,color:"var(--red)",background:"#ffebee",borderRadius:4,padding:"1px 6px"}}>In progress</span>}
+                  {allDone&&<span style={{fontSize:11,fontWeight:600,color:"var(--green-mid)",background:"#e8f5e9",borderRadius:4,padding:"1px 6px"}}>Completed</span>}
+                  <span style={{fontSize:11,color:"var(--gray-400)"}}>{c?.name||"No course"} · {t.groups?.length||0}g · {t.pairs?.length||0} pairs</span>
+                </div>
+              </div>
+              <button className="btn btn-sm btn-danger" style={{flexShrink:0}} onClick={()=>setDelTourn(t.id)}>Del</button>
+            </div>
+            {/* Row 2: action buttons */}
+            <div style={{display:"flex",gap:6,flexWrap:"nowrap",overflowX:"auto"}}>
+              <button className="btn btn-sm btn-ghost" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView("setup");}}>Setup</button>
+              {t.status==="scoring"&&!allDone&&(()=>{
+                const hasAnyScore=!!(t.scores&&Object.values(t.scores).some(arr=>arr.some(v=>parseInt(v)>0)));
+                return<button className="btn btn-sm btn-gold" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView("scoring");}}>▶ {hasAnyScore?"Resume Scoring":"Start Scoring"}</button>;
+              })()}
+              <button className="btn btn-sm btn-primary" style={{flexShrink:0}} onClick={()=>{setTid(t.id);setView(t.status==="setup"?"scoring":"results");}}>
+                {t.status==="setup"?"Score":"Results"}
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      {delTourn&&<ConfirmDialog
+        msg="Delete tournament?"
+        detail="All scores and groups will be permanently deleted."
+        okLabel="Delete"
+        onOk={()=>{saveTourns(tourns.filter(x=>x.id!==delTourn));setDelTourn(null);}}
+        onCancel={()=>setDelTourn(null)}
+      />}
+    </div>
+  );
+}
+
+// ── Tournament Setup ──────────────────────────────────────────────────────────
+function TournSetup({t,course,data,updateT,onBack,onStart}){
+  const [tab,setTab]=useState("details");
+  const [msg,setMsg]=useState(null);
+  const [teamName,setTeamName]=useState("");
+  const [savedTeams,setSavedTeams]=useState(new Set());
+  const [expandedTeam,setExpandedTeam]=useState(null);
+  const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),3500);};
+
+  const set=(k,v)=>updateT(t.id,x=>({...x,[k]:v}));
+
+  // ── Teams ──
+  const addTeam=()=>{
+    if(!teamName.trim())return;
+    const newId=Date.now();
+    updateT(t.id,x=>({...x,teams:[...x.teams,{id:newId,name:teamName.trim(),playerIds:[]}]}));
+    setTeamName("");
+    setExpandedTeam(newId);
+  };
+  const saveTeam=(tid)=>{setSavedTeams(prev=>new Set([...prev,tid]));setExpandedTeam(null);};
+  const removeTeam=(tid)=>updateT(t.id,x=>({...x,teams:x.teams.filter(t=>t.id!==tid)}));
+  const toggleTeamP=(teamId,pid)=>updateT(t.id,x=>({...x,
+    teams:x.teams.map(t=>t.id===teamId?{...t,playerIds:t.playerIds?.includes(pid)?t.playerIds.filter(i=>i!==pid):[...(t.playerIds||[]),pid]}:t)
+  }));
+
+  // ── Groups ──
+  const addGroup=()=>updateT(t.id,x=>({...x,groups:[...x.groups,{id:Date.now(),name:"Group "+(x.groups.length+1),playerIds:[]}]}));
+  const removeGroup=(gid)=>updateT(t.id,x=>({...x,groups:x.groups.filter(g=>g.id!==gid)}));
+  const toggleGroupP=(gid,pid)=>{
+    const grp=t.groups.find(g=>g.id===gid);
+    const inThis=grp?.playerIds?.includes(pid);
+    const inOther=t.groups.some(g=>g.id!==gid&&g.playerIds?.includes(pid));
+    if(inOther&&!inThis)return N("Already in another group","error");
+    if(!inThis&&(grp?.playerIds?.length||0)>=4)return N("Max 4 players per group","error");
+    if(isRyder&&!inThis){
+      const playerTeam=t.teams.find(tm=>(tm.playerIds||[]).includes(pid));
+      if(!playerTeam)return N("Assign this player to a team first","error");
+      const teamCountInGroup=(grp?.playerIds||[]).filter(p=>(playerTeam.playerIds||[]).includes(p)).length;
+      if(teamCountInGroup>=2)return N(`Already 2 players from ${playerTeam.name} in this group`,"error");
+    }
+    updateT(t.id,x=>({...x,groups:x.groups.map(g=>g.id===gid?{...g,playerIds:inThis?g.playerIds.filter(i=>i!==pid):[...(g.playerIds||[]),pid]}:g)}));
+  };
+
+  // ── Pairs ──
+  const addPair=()=>updateT(t.id,x=>({...x,pairs:[...x.pairs,{id:Date.now(),p1Id:null,p2Id:null,diff:null,higherPId:null}]}));
+  const removePair=(pid)=>updateT(t.id,x=>({...x,pairs:x.pairs.filter(p=>p.id!==pid)}));
+  const setPairF=(pid,k,v)=>updateT(t.id,x=>({...x,pairs:x.pairs.map(p=>p.id===pid?{...p,[k]:v}:p)}));
+
+  const isRyder=(t.teamFormat||"modSF")==="ryder";
+  const ryderTeamsReady=isRyder?t.teams.length>=2&&t.teams.every(tm=>(tm.playerIds||[]).length>=2):true;
+  const validGroups=t.groups.filter(g=>g.playerIds?.length>0);
+  // Ryder: every group must have exactly 2 players from each team
+  const ryderGroupsValid=!isRyder||validGroups.every(g=>{
+    if(!g.playerIds?.length)return true;
+    return t.teams.every(tm=>(g.playerIds||[]).filter(pid=>(tm.playerIds||[]).includes(pid)).length===2);
+  });
+  const canStart=t.name.trim()&&validGroups.length>0&&(isRyder?ryderTeamsReady&&ryderGroupsValid:true);
+
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left"><h2>{t.name||"New Tournament"}</h2><p>Tournament setup</p></div>
+        <div style={{display:"flex",gap:7}}>
+          <button className="btn btn-ghost" onClick={onBack}>← All</button>
+          <button className="btn btn-primary" onClick={()=>{
+              if(!t.name.trim())return N("Enter tournament name","error");
+              if(isRyder&&!ryderTeamsReady)return N("Set up both teams with at least 2 players each first","error");
+              if(!validGroups.length)return N("Add at least one group with players","error");
+              if(isRyder&&!ryderGroupsValid)return N("Each group must have exactly 2 players from each team","error");
+              onStart();
+            }}>Start Scoring →</button>
+        </div>
+      </div>
+      {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+
+      {isRyder&&!ryderTeamsReady&&tab==="groups"&&(
+        <div className="alert alert-warn" style={{margin:"8px 0"}}>Set up both teams before creating groups.</div>
+      )}
+      <div className="tabs">
+        {[
+          {id:"details",label:"Details"},
+          isRyder?{id:"teams",label:`Teams (${t.teams.length})`,warn:!ryderTeamsReady}:null,
+          {id:"groups",label:`Groups (${t.groups.length})`},
+          !isRyder?{id:"teams",label:`Teams (${t.teams.length})`}:null,
+          {id:"pairs",label:`Ratha Ratha Pairs (${t.pairs.length})`},
+        ].filter(Boolean).map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")+(s.warn?" tab-warn":"")} onClick={()=>setTab(s.id)}>{s.label}{s.warn?" ⚠️":""}</div>)}
+      </div>
+
+      {tab==="details"&&(
+        <div className="card">
+          <div className="card-title">Tournament Details</div>
+          <div className="fg fg2">
+            <div className="ff"><label>Tournament Name</label><input value={t.name} onChange={e=>set("name",e.target.value)} placeholder="Lucky Last Cup 2025"/></div>
+            <div className="ff"><label>Course</label>
+              <select value={t.courseId} onChange={e=>set("courseId",e.target.value)}>
+                {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{marginTop:12}} className="fg fg2">
+            <div className="ff">
+              <label>Team Scoring Format</label>
+              <select value={t.teamFormat||"modSF"} onChange={e=>set("teamFormat",e.target.value)}>
+                <option value="modSF">Modified Stableford (75% HC)</option>
+                <option value="ryder">Ryder Cup (Matchplay)</option>
+              </select>
+            </div>
+          </div>
+          <div style={{marginTop:12,padding:10,background:"var(--gray-50)",borderRadius:8,fontSize:12,color:"var(--gray-600)",lineHeight:1.6}}>
+            {(t.teamFormat||"modSF")==="modSF"&&<span><strong>Modified Stableford:</strong> Each player's Modified Stableford (75% HC) score summed for team total.</span>}
+            {t.teamFormat==="ryder"&&<span><strong>Ryder Cup:</strong> Head-to-head matchplay between teams. Assign one player from each team per match. Lower net score wins the hole — win = 1 pt, halve = ½ pt. Matches set up below.</span>}
+          </div>
+
+        </div>
+      )}
+
+      {tab==="teams"&&(
+        <div className="card">
+          <div className="card-title">Teams <span style={{fontSize:12,fontWeight:400,color:"var(--gray-400)"}}>— optional, scored on Modified Stableford (75%)</span></div>
+          {!t.teams.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginBottom:14}}>No teams yet — teams are optional.</p>}
+          {t.teams.map((team,ti)=>{
+            const isSaved=savedTeams.has(team.id);
+            const isExpanded=expandedTeam===team.id;
+            const pickedElsewhere=new Set(t.teams.filter(ot=>ot.id!==team.id&&savedTeams.has(ot.id)).flatMap(ot=>ot.playerIds||[]));
+            const teamPlayers=data.players.filter(p=>(team.playerIds||[]).includes(p.id));
+            return(
+              <div key={team.id} style={{marginBottom:10,border:"2px solid "+TBORD[ti%TBORD.length],borderRadius:9}}>
+                {/* Team header — always visible */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 13px",background:TCOLS[ti%TCOLS.length],cursor:isSaved?"pointer":"default"}}
+                  onClick={()=>isSaved&&setExpandedTeam(isExpanded?null:team.id)}>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--gray-800)"}}>{team.name}</div>
+                    <div style={{fontSize:11,color:"var(--gray-600)",marginTop:2}}>
+                      {teamPlayers.length?teamPlayers.map(p=>p.name).join(" · "):"No players yet"}
+                      {isSaved&&<span style={{marginLeft:6,color:"var(--green)",fontWeight:600}}>✓ Saved</span>}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    {isSaved&&<span style={{fontSize:11,color:"var(--gray-400)"}}>{isExpanded?"▲":"▼"}</span>}
+                    <button className="btn btn-sm btn-danger" onClick={e=>{e.stopPropagation();removeTeam(team.id);setSavedTeams(prev=>{const n=new Set(prev);n.delete(team.id);return n;});}}
+                      >Remove</button>
+                  </div>
+                </div>
+                {/* Player picker — shown when editing (not saved, or expanded) */}
+                {(!isSaved||isExpanded)&&(
+                  <div style={{padding:"10px 13px",background:"white"}}>
+                    <div style={{fontSize:11,fontWeight:600,color:"var(--gray-400)",textTransform:"uppercase",letterSpacing:.6,marginBottom:8}}>Select Players</div>
+                    <div className="psel" style={{maxHeight:220,overflowY:"auto",paddingRight:4}}>
+                      {data.players.map(p=>{
+                        const inThis=(team.playerIds||[]).includes(p.id);
+                        const taken=pickedElsewhere.has(p.id);
+                        return(
+                          <div key={p.id} className={"pchip"+(inThis?" on":taken?" disabled":"")}
+                            onClick={()=>!taken&&toggleTeamP(team.id,p.id)}>
+                            <span>{inThis?"✓":taken?"—":"○"}</span>
+                            <span style={{flex:1}}>{p.name}</span>
+                            <span className="hc">{p.handicap}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{marginTop:10}}>
+                      <button className="btn btn-primary" style={{width:"100%"}} onClick={()=>{
+                        if(!(team.playerIds?.length>0)){N("Add at least one player to the team","err");return;}
+                        saveTeam(team.id);
+                      }}>Save Team ✓</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {/* Add next team — only show if no unsaved team exists */}
+          {!t.teams.some(tm=>!savedTeams.has(tm.id))&&(
+            <div style={{display:"flex",gap:8,marginTop:t.teams.length?12:0}}>
+              <div className="ff" style={{flex:1}}><label>Team Name</label>
+                <input value={teamName} onChange={e=>setTeamName(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addTeam()} placeholder="e.g. Eagles"/>
+              </div>
+              <button className="btn btn-primary" style={{alignSelf:"flex-end"}} onClick={addTeam}
+                disabled={!teamName.trim()}>
+                {t.teams.length?"+ Add Next Team":"+ Add Team"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==="groups"&&(
+        <div>
+          <div className="card">
+            <div className="card-title">Playing Groups <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addGroup} disabled={isRyder&&!ryderTeamsReady}>+ Add Group</button></div>
+            {isRyder
+              ?<Alrt type="info" msg={`Ryder Cup: each group must have exactly 2 players from ${t.teams[0]?.name||"Team A"} and 2 from ${t.teams[1]?.name||"Team B"}. Groups become doubles matches.`}/>
+              :<Alrt type="info" msg="Each group creates one scorecard. Max 4 players per group. A player can only be in one group."/>
+            }
+            {isRyder&&!ryderTeamsReady&&<div style={{padding:"10px 0",fontSize:13,color:"var(--gray-400)"}}>Set up both teams with at least 2 players each before creating groups.</div>}
+            {!t.groups.length&&ryderTeamsReady&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No groups yet.</p>}
+            {t.groups.map((g,gi)=>{
+              const gp=data.players.filter(p=>g.playerIds?.includes(p.id));
+              // Ryder: count per team, flag if invalid
+              const teamCounts=isRyder?t.teams.map(tm=>({team:tm,count:(g.playerIds||[]).filter(pid=>(tm.playerIds||[]).includes(pid)).length})):[];
+              const groupValid=!isRyder||teamCounts.every(tc=>tc.count===2);
+              const groupFull=!isRyder?(gp.length>=4):(teamCounts.every(tc=>tc.count>=2));
+              return(
+                <div key={g.id} className="group-card">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:9}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"var(--green)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      Group {gi+1}
+                      <span style={{fontWeight:400,color:"var(--gray-400)",fontSize:12}}>— {gp.length?gp.map(p=>p.name).join(", "):"Empty"}</span>
+                      {isRyder&&teamCounts.map(tc=>(
+                        <span key={tc.team.id} className={"badge "+(tc.count===2?"b-green":tc.count>0?"b-gold":"b-gray")} style={{fontSize:10}}>
+                          {tc.team.name}: {tc.count}/2
+                        </span>
+                      ))}
+                      {isRyder&&gp.length===4&&!groupValid&&<span className="badge b-red" style={{fontSize:10}}>Invalid split</span>}
+                    </div>
+                    <button className="btn btn-sm btn-danger" onClick={()=>removeGroup(g.id)}>Remove</button>
+                  </div>
+                  <div className="psel">
+                    {(isRyder?[...t.teams[0].playerIds,...t.teams[1].playerIds].map(pid=>data.players.find(p=>String(p.id)===String(pid))).filter(Boolean):data.players).map(p=>{
+                      const inThis=g.playerIds?.includes(p.id);
+                      const inOther=t.groups.some(x=>x.id!==g.id&&x.playerIds?.includes(p.id));
+                      const playerTeam=isRyder?t.teams.find(tm=>(tm.playerIds||[]).includes(p.id)):null;
+                      const teamCount=isRyder&&playerTeam?(g.playerIds||[]).filter(pid=>(playerTeam.playerIds||[]).includes(pid)).length:0;
+                      const teamFull=isRyder&&!inThis&&teamCount>=2;
+                      return(
+                        <div key={p.id} className={"pchip"+(inThis?" on":(inOther||teamFull)?" disabled":"")}
+                          onClick={()=>toggleGroupP(g.id,p.id)} title={inOther?"In another group":teamFull?`${playerTeam.name} already has 2 in this group`:""}>
+                          <span>{inThis?"✓":(inOther||teamFull)?"✗":"○"}</span>
+                          <span style={{flex:1}}>{p.name}</span>
+                          {isRyder&&playerTeam&&<span style={{fontSize:10,padding:"1px 5px",borderRadius:3,background:inThis?"rgba(255,255,255,0.3)":"var(--gray-100)",color:inThis?"white":"var(--gray-600)",marginRight:2}}>{playerTeam.name}</span>}
+                          <span className="hc">{p.handicap}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab==="pairs"&&(
+        <div className="card">
+          <div className="card-title">Ratha Ratha Pairs <button className="btn btn-sm btn-primary" style={{marginLeft:"auto"}} onClick={addPair}>+ Add Pair</button></div>
+          <Alrt type="info" msg="Set the HC differential for each pair. The receiving player gets that many strokes allocated by stroke index."/>
+          {!t.pairs.length&&<p style={{fontSize:13,color:"var(--gray-400)",marginTop:8}}>No pairs yet.</p>}
+          {t.pairs.map((pair,pi)=>{
+            const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
+            const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
+            const storedDiff=p1&&p2?getStoredDiff(p1.id,p2.id):null;
+            const suggestDiff=storedDiff&&p1&&p2&&pair.diff==null;
+            // Derive current diff display — support legacy hcp1/hcp2 pairs
+            const curDiff=pair.diff!=null?pair.diff:(pair.hcp1!=null&&pair.hcp2!=null?Math.round(Math.abs(parseFloat(pair.hcp1)-parseFloat(pair.hcp2))):null);
+            const curHigher=pair.higherPId||(pair.hcp1!=null&&pair.hcp2!=null?(parseFloat(pair.hcp1)>=parseFloat(pair.hcp2)?pair.p1Id:pair.p2Id):null);
+            const higherName=curHigher?(String(curHigher)===String(pair.p1Id)?p1?.name:p2?.name):null;
+            return(
+              <div key={pair.id} className="pair-card">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontWeight:700,fontSize:13,color:"var(--green)"}}>Pair {pi+1}</div>
+                  <button className="btn btn-sm btn-danger" onClick={()=>removePair(pair.id)}>Remove</button>
+                </div>
+                <div className="fg fg2" style={{marginBottom:10}}>
+                  <div className="ff"><label>Player A</label>
+                    <select value={pair.p1Id||""} onChange={e=>setPairF(pair.id,"p1Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="ff"><label>Player B</label>
+                    <select value={pair.p2Id||""} onChange={e=>setPairF(pair.id,"p2Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {data.players.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {p1&&p2&&(
+                  <div className="fg fg2">
+                    <div className="ff"><label>HC differential</label>
+                      <input type="number" inputMode="numeric" min="0" max="36"
+                        value={curDiff!=null?String(curDiff):""}
+                        onChange={e=>{const v=e.target.value;setPairF(pair.id,"diff",v===""?null:parseInt(v)||0);}}
+                        onBlur={e=>{const v=parseInt(e.target.value);setPairF(pair.id,"diff",isNaN(v)?null:Math.max(0,v));}}
+                        placeholder="0"/>
+                    </div>
+                    <div className="ff"><label>Strokes given to</label>
+                      <select value={curHigher||""} onChange={e=>setPairF(pair.id,"higherPId",e.target.value||null)}>
+                        <option value="">— Select —</option>
+                        <option value={String(pair.p1Id)}>{p1.name}</option>
+                        <option value={String(pair.p2Id)}>{p2.name}</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                {p1&&p2&&curDiff!=null&&higherName&&(
+                  <div style={{marginTop:8,padding:"7px 10px",background:"#e8f5e9",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>⚔️ {higherName} receives {curDiff} stroke{curDiff!==1?"s":""}</span>
+                    <span style={{fontSize:11,color:"var(--gray-400)"}}>allocated by SI</span>
+                  </div>
+                )}
+                {storedDiff&&p1&&p2&&(
+                  <div style={{marginTop:6,padding:"5px 10px",background:"var(--gray-50)",borderRadius:6,fontSize:12,color:"var(--gray-600)",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                    <span>Last round: <strong>+{storedDiff.diff}</strong> to {storedDiff.higherHcpId===String(p1.id)?p1.name.split(" ")[0]:p2.name.split(" ")[0]}</span>
+                    {suggestDiff&&<button className="btn btn-sm btn-ghost" style={{fontSize:11,padding:"2px 8px"}} onClick={()=>{
+                      const isP1Higher=storedDiff.higherHcpId===String(p1.id);
+                      setPairF(pair.id,"diff",storedDiff.diff);
+                      setPairF(pair.id,"higherPId",isP1Higher?String(p1.id):String(p2.id));
+                    }}>Apply</button>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Tournament Scoring ────────────────────────────────────────────────────────
+function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSetup}){
+  const [activeGid,setActiveGid]=useState(null);
+  const [viewGid,setViewGid]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [msg,setMsg]=useState(null);
+  const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
+
+  const gPlayers=(g)=>data.players.filter(p=>g.playerIds?.includes(p.id));
+  const isLocked=(gid)=>(t.lockedCards||[]).includes(gid);
+  const isScoringActive=(gid)=>(t.scoringCards||[]).includes(gid);
+  const allDone=t.groups.length>0&&t.groups.every(g=>isLocked(g.id));
+
+  const setScore=(pid,h,v)=>updateT(t.id,x=>({...x,scores:{...x.scores,[pid]:(x.scores?.[pid]||Array(18).fill("")).map((sv,i)=>i===h?v:sv)}}));
+
+  const finishCard=async(gid)=>{
+    setSaving(true);
+    try{
+      const g=t.groups.find(x=>x.id===gid);
+      if(!g){N("Group not found","error");setSaving(false);return;}
+      const players=gPlayers(g);
+      // Validate every hole has a score for every player
+      const incomplete=players.filter(p=>(t.scores?.[p.id]||Array(18).fill("")).some(v=>!parseInt(v)));
+      if(incomplete.length){
+        N("All 18 holes must be entered for: "+incomplete.map(p=>p.name).join(", "),"error");
+        setSaving(false);return;
+      }
+      const date=new Date().toISOString().split("T")[0];
+      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+      if(url){
+        await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:t.name,scores:t.scores?.[r.playerId]||Array(18).fill(0)})));
+        await refresh();
+      }
+      updateT(t.id,x=>({...x,
+        lockedCards:[...(x.lockedCards||[]),gid],
+        scoringCards:[...(x.scoringCards||[]).filter(id=>id!==gid),gid]
+      }));
+      // Update pair HC differentials based on Stableford winner
+      (t.pairs||[]).forEach(pair=>{
+        if(!pair.p1Id||!pair.p2Id)return;
+        const pp1=data.players.find(p=>String(p.id)===String(pair.p1Id));
+        const pp2=data.players.find(p=>String(p.id)===String(pair.p2Id));
+        if(!pp1||!pp2)return;
+        const pr=calcPair({p1:pp1,p2:pp2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+        if(!pr.winner)return; // tied — no adjustment
+        const currentDiff=pr.hcpDiff;
+        const higherHcpId=pr.p1Higher?String(pp1.id):String(pp2.id);
+        const winnerId=String(pr.winner.id);
+        // Differential adjustment:
+        // Higher-HC player gives strokes to lower-HC player
+        // If higher-HC player WINS → they didn't give enough → increase diff by 1
+        // If higher-HC player LOSES → they gave too many → decrease diff by 1
+        const higherHcpWon=winnerId===higherHcpId;
+        const newDiff=higherHcpWon?currentDiff+1:currentDiff-1;
+        savePairDiff(pp1.id,pp2.id,Math.max(0,newDiff),higherHcpId);
+      });
+      N("Card saved and locked ✓");setActiveGid(null);
+    }catch(e){N("Error: "+e.message,"error");}
+    setSaving(false);
+  };
+
+  const startScoring=(gid)=>{
+    updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==gid),gid]}));
+    setActiveGid(gid);
+  };
+
+  const saveScores=(gid)=>{
+    // Save scores to state without releasing the lock — keeps session active
+    N("Scores saved ✔","ok");
+  };
+
+  const saveAndExit=(gid)=>{
+    // Release the in-progress lock but keep scores
+    updateT(t.id,x=>({...x,scoringCards:(x.scoringCards||[]).filter(id=>id!==gid)}));
+    setActiveGid(null);
+  };
+
+  const [discardDlg,setDiscardDlg]=useState(null);
+  const discardCard=(gid)=>{
+    setDiscardDlg(gid);
+  };
+  const doDiscard=(gid)=>{
+    const pids=t.groups.find(g=>g.id===gid)?.playerIds||[];
+    updateT(t.id,x=>{
+      const newScores={...x.scores};
+      pids.forEach(pid=>{delete newScores[String(pid)];delete newScores[pid];});
+      return{...x,scores:newScores,scoringCards:(x.scoringCards||[]).filter(id=>id!==gid)};
+    });
+    setActiveGid(null);setDiscardDlg(null);
+    N("Scores discarded","warn");
+  };
+
+  // ── View-only mode ──
+  if(viewGid){
+    const g=t.groups.find(x=>x.id===viewGid);
+    if(!g)return null;
+    const players=gPlayers(g);
+    const complete=isLocked(viewGid);
+    const active=isScoringActive(viewGid);
+    return(
+      <div>
+        <div className="ph">
+          <div className="ph-left"><h2>{t.name}</h2><p>Viewing Group — {players.map(p=>p.name).join(", ")}</p></div>
+          <button className="btn btn-ghost" onClick={()=>setViewGid(null)}>← Back to Groups</button>
+        </div>
+        <div className={"alert "+(complete?"alert-ok":"alert-info")} style={{marginBottom:12}}>
+          👁 <strong>View Only</strong> — {complete?"This card is complete and locked.":active?"Scoring is in progress by another user. Refresh to see latest scores.":"Scores entered so far (not yet submitted)."}
+        </div>
+        <div className="card">
+          <div className="card-title">{course.name} — {complete?"Completed Scorecard":"Scorecard (Read-only)"}</div>
+          <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={null} locked={true}/>
+        </div>
+        {players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0))&&(
+          <div className="card">
+            <div className="card-title">{complete?"Final Scores":"Live Scores"} {active&&!complete&&<span className="live-dot"/>}</div>
+            <table className="dt">
+              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <tbody>
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                  <tr key={r.playerId}>
+                    <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
+                    <td>{r.gross||"—"}</td>
+                    <td><span className="badge b-green">{r.stableford}</span></td>
+                    <td><span className="badge b-blue">{r.modStableford}</span></td>
+                    <td>{r.strokeNet||"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Active scoring view ──
+  if(activeGid){
+    const g=t.groups.find(x=>x.id===activeGid);
+    if(!g)return null;
+    const players=gPlayers(g);
+    return(
+      <>
+        <div>
+        <div className="ph">
+          <div className="ph-left"><h2>{t.name}</h2><p>Scoring: {players.map(p=>p.name).join(", ")}</p></div>
+          <button className="btn btn-ghost" onClick={()=>saveAndExit(g.id)}>← Save & Exit</button>
+        </div>
+        {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+        <div className="card">
+          <div className="card-title">{course.name} — Group Scorecard</div>
+          <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={setScore} locked={false}/>
+          <div className="btn-row" style={{marginTop:12}}>
+            <button className="btn btn-ghost btn-sm" onClick={()=>saveScores(g.id)}>💾 Save</button>
+            <button className="btn btn-primary" onClick={()=>saveAndExit(g.id)}>{saving?<><Spin/>Saving…</>:"← Save & Exit"}</button>
+            <button className="btn btn-danger btn-sm" onClick={()=>discardCard(g.id)}>🗑 Discard</button>
+          </div>
+          <div style={{fontSize:11.5,color:"var(--gray-400)",marginTop:6}}>To lock this card, return to the Groups view and click 🔒 Lock.</div>
+        </div>
+        {players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0))&&(
+          <div className="card">
+            <div className="card-title">Live Scores <span className="live-dot"/></div>
+            <table className="dt">
+              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <tbody>
+                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                  <tr key={r.playerId}>
+                    <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
+                    <td>{r.gross||"—"}</td>
+                    <td><span className="badge b-green">{r.stableford}</span></td>
+                    <td><span className="badge b-blue">{r.modStableford}</span></td>
+                    <td>{r.strokeNet||"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {discardDlg&&<ConfirmDialog
+        msg="Discard all scores?"
+        detail="All hole scores for this group will be permanently cleared."
+        okLabel="Discard"
+        onOk={()=>doDiscard(discardDlg)}
+        onCancel={()=>setDiscardDlg(null)}
+      />}
+      </>
+    );
+  }
+
+  // ── Group list overview ──
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left"><h2>{t.name}</h2><p>{course.name} · {t.groups.length} group{t.groups.length!==1?"s":""}</p></div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          <button className="btn btn-ghost" onClick={onBack}>← All Tournaments</button>
+          <button className="btn btn-ghost btn-sm" onClick={onSetup}>⚙ Setup</button>
+          <button className="btn btn-primary" onClick={onGoResults}>📊 Results</button>
+          {allDone&&<button className="btn btn-gold" onClick={()=>{updateT(t.id,x=>({...x,status:"complete"}));onGoResults();}}>🏁 Finalise</button>}
+        </div>
+      </div>
+      {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+      {allDone&&<Alrt type="ok" msg="All groups completed! Click Finalise to mark the tournament complete."/>}
+      {!t.groups.length&&<Alrt type="warn" msg="No groups set up — go to Setup to add playing groups."/>}
+      {t.groups.map((g,gi)=>{
+        const players=gPlayers(g);
+        const locked=isLocked(g.id);
+        const scoringNow=isScoringActive(g.id);
+        const hasPartialScores=players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0));
+        return(
+          <div key={g.id} className={"group-card"+(locked?" locked":"")}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontWeight:700,fontSize:14,color:"var(--green)"}}>Group {gi+1}</div>
+                <div style={{fontSize:12.5,color:"var(--gray-600)",marginTop:3}}>
+                  {players.length?players.map(p=>`${p.name} (HC ${p.handicap})`).join(" · "):"Empty group"}
+                </div>
+                {locked&&(
+                  <div style={{fontSize:11,color:"#2e7d32",marginTop:3,fontWeight:700}}>🔒 Locked — view only</div>
+                )}
+                {!locked&&scoringNow&&(
+                  <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4}}>
+                    <span className="live-dot" style={{width:7,height:7}}/>
+                    <span style={{fontSize:11,color:"var(--red)",fontWeight:700}}>Scoring in progress</span>
+                  </div>
+                )}
+                {!locked&&!scoringNow&&hasPartialScores&&(
+                  <div style={{fontSize:11,color:"var(--gold)",marginTop:3,fontWeight:600}}>● Partially scored</div>
+                )}
+              </div>
+              <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+                {locked?(
+                  <>
+                    <span className="badge b-green">🔒 Locked</span>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View</button>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>{
+                      updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id),scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id)}));
+                      N("Card unlocked — scores preserved");
+                    }}>🔓 Unlock</button>
+                  </>
+                ):scoringNow?(
+                  <>
+                    <span className="badge b-red" style={{animation:"pulse 1.5s ease-in-out infinite"}}>⏳ In Progress</span>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View Only</button>
+                    <button className="btn btn-sm btn-gold" onClick={()=>{
+                      // Clear ALL scoringCards (kick any active sessions), then claim this one
+                      updateT(t.id,x=>({...x,scoringCards:[g.id]}));
+                      setActiveGid(g.id);
+                      N("Session taken over — continuing from last saved scores");
+                    }}>🎯 Take Over Scoring</button>
+                    <button className="btn btn-sm btn-ghost" onClick={()=>{
+                      updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id],lockedCards:[...(x.lockedCards||[]),g.id]}));
+                      N("Card locked — scores preserved");
+                    }}>🔒 Lock</button>
+                  </>
+                ):(
+                  <button className="btn btn-primary" onClick={()=>startScoring(g.id)}>{hasPartialScores?"▶ Resume Scoring":"▶ Start Scoring"}</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {discardDlg&&<ConfirmDialog
+        msg="Discard all scores?"
+        detail="All hole scores for this group will be permanently cleared."
+        okLabel="Discard"
+        onOk={()=>doDiscard(discardDlg)}
+        onCancel={()=>setDiscardDlg(null)}
+      />}
+    </div>
+  );
+}
+
+// ── Tournament Results ────────────────────────────────────────────────────────
+function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
+  const [tab,setTab]=useState("individual");
+  const [expandedPairs,setExpandedPairs]=useState(new Set());
+  const togglePair=(idx)=>setExpandedPairs(prev=>{const n=new Set(prev);n.has(idx)?n.delete(idx):n.add(idx);return n;});
+
+  const allGroupPlayerIds=new Set(t.groups.flatMap(g=>g.playerIds||[]));
+  const allPlayers=data.players.filter(p=>allGroupPlayerIds.has(p.id));
+  const isLive=t.status!=="complete";
+
+  const indivResults=useMemo(()=>{
+    if(!course||!allPlayers.length)return[];
+    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+  },[allPlayers,t.scores,course]);
+
+  const pairResults=useMemo(()=>{
+    if(!course||!t.pairs?.length)return[];
+    return t.pairs.filter(p=>p.p1Id&&p.p2Id).map(pair=>{
+      const p1=data.players.find(p=>String(p.id)===String(pair.p1Id));
+      const p2=data.players.find(p=>String(p.id)===String(pair.p2Id));
+      if(!p1||!p2)return null;
+      return calcPair({p1,p2,diff:pair.diff,higherPId:pair.higherPId,hcp1:pair.hcp1,hcp2:pair.hcp2},course,t.scores||{});
+    }).filter(Boolean);
+  // eslint-disable-next-line
+  },[t.pairs,JSON.stringify(t.scores),data.players,course]);
+
+  const teamResults=useMemo(()=>{
+    if(!t.teams?.length||!indivResults.length)return[];
+    if((t.teamFormat||"modSF")==="ryder"){
+      // Derive doubles matches from groups: each group = 1 doubles match (2 per team)
+      const teamA=t.teams[0],teamB=t.teams[1];
+      if(!teamA||!teamB)return[];
+      const derivedMatches=(t.groups||[]).filter(g=>(g.playerIds||[]).length===4).map((g,i)=>{
+        const aPlayers=(g.playerIds||[]).filter(pid=>(teamA.playerIds||[]).includes(pid));
+        const bPlayers=(g.playerIds||[]).filter(pid=>(teamB.playerIds||[]).includes(pid));
+        if(aPlayers.length!==2||bPlayers.length!==2)return null;
+        return{matchType:"doubles",p1aId:aPlayers[0],p1bId:aPlayers[1],p2aId:bPlayers[0],p2bId:bPlayers[1]};
+      }).filter(Boolean);
+      if(!derivedMatches.length)return[];
+      const res=calcRyder(t.teams,derivedMatches,course,t.scores||{},allPlayers);
+      return res?[res]:[];
+    }
+    // Default: Modified Stableford
+    return t.teams.map(team=>{
+      const members=indivResults.filter(r=>(team.playerIds||[]).includes(r.playerId));
+      const total=members.reduce((a,r)=>a+(r.gross>0?r.modStableford:0),0);
+      return{team,members,total};
+    }).sort((a,b)=>b.total-a.total);
+  // eslint-disable-next-line
+  },[t.teams,t.teamFormat,t.groups,indivResults,JSON.stringify(t.scores)]);
+
+  const rankBy=(key,hi=true)=>[...indivResults].filter(r=>r.gross>0).sort((a,b)=>hi?b[key]-a[key]:a[key]-b[key]).map((r,i)=>({...r,pos:i+1}));
+
+  const generateScorecardImage=()=>{
+    const canvas=document.createElement("canvas");
+    const groups=t.groups||[];
+    const rowH=22,colW=30,nameW=110,hdrH=28,groupGap=18,summaryH=26;
+    const cols=course.holes.length; // 18
+    const totalW=nameW+colW*cols+colW*2+colW; // name + 18 holes + 2 nines total + grand total
+    // Calculate total height
+    let totalH=0;
+    groups.forEach(g=>{
+      const ps=data.players.filter(p=>g.playerIds?.includes(p.id));
+      totalH+=hdrH+rowH*ps.length+summaryH+groupGap;
+    });
+    totalH+=hdrH+20; // title
+    canvas.width=totalW+20;
+    canvas.height=totalH+20;
+    const ctx=canvas.getContext("2d");
+    // Background
+    ctx.fillStyle="#ffffff";ctx.fillRect(0,0,canvas.width,canvas.height);
+    let y=10;
+    // Title
+    ctx.fillStyle="#1b5e20";ctx.fillRect(10,y,totalW,hdrH);
+    ctx.fillStyle="#fff";ctx.font="bold 13px Arial";ctx.textAlign="center";
+    ctx.fillText(`${t.name} — ${course.name}`,10+totalW/2,y+18);
+    y+=hdrH+8;
+    const drawCell=(x,cy,w,h,bg,txt,fg="#333",bold=false,sz=10)=>{
+      ctx.fillStyle=bg;ctx.fillRect(x,cy,w,h);
+      ctx.strokeStyle="#ccc";ctx.lineWidth=0.5;ctx.strokeRect(x,cy,w,h);
+      if(txt!=null){ctx.fillStyle=fg;ctx.font=(bold?"bold ":"")+sz+"px Arial";ctx.textAlign="center";ctx.fillText(String(txt),x+w/2,cy+h/2+sz*0.35);}
+    };
+    groups.forEach((g,gi)=>{
+      const ps=data.players.filter(p=>g.playerIds?.includes(p.id));
+      if(!ps.length)return;
+      // Group header row
+      ctx.fillStyle="#2e7d32";ctx.fillRect(10,y,totalW,hdrH-4);
+      ctx.fillStyle="#fff";ctx.font="bold 11px Arial";ctx.textAlign="left";
+      const locked=(t.lockedCards||[]).includes(g.id);
+      ctx.fillText(`Group ${gi+1}: ${ps.map(p=>p.name).join(", ")}${locked?" ✓":""}`,18,y+(hdrH-4)/2+4);
+      y+=hdrH-4;
+      // Column headers
+      let x=10;
+      drawCell(x,y,nameW,rowH,"#388e3c","Player","#fff",true,9);x+=nameW;
+      for(let i=0;i<9;i++){drawCell(x,y,colW,rowH,"#388e3c",String(i+1),"#fff",true,9);x+=colW;}
+      drawCell(x,y,colW,rowH,"#1b5e20","OUT","#fff",true,8);x+=colW;
+      for(let i=9;i<18;i++){drawCell(x,y,colW,rowH,"#388e3c",String(i+1),"#fff",true,9);x+=colW;}
+      drawCell(x,y,colW,rowH,"#1b5e20","IN","#fff",true,8);x+=colW;
+      drawCell(x,y,colW,rowH,"#1b5e20","TOT","#fff",true,8);
+      y+=rowH;
+      // Par row
+      x=10;
+      drawCell(x,y,nameW,rowH,"#e8f5e9","Par","#2e7d32",true,9);x+=nameW;
+      let out=0,inPar=0;
+      course.holes.forEach((h,i)=>{
+        if(i<9){out+=h.par;drawCell(x,y,colW,rowH,"#e8f5e9",h.par,"#2e7d32",false,9);}
+        else{inPar+=h.par;drawCell(x,y,colW,rowH,"#e8f5e9",h.par,"#2e7d32",false,9);}
+        if(i===8){x+=colW;drawCell(x,y,colW,rowH,"#c8e6c9",out,"#1b5e20",true,9);}
+        x+=colW;
+      });
+      drawCell(x,y,colW,rowH,"#c8e6c9",inPar,"#1b5e20",true,9);x+=colW;
+      drawCell(x,y,colW,rowH,"#a5d6a7",out+inPar,"#1b5e20",true,9);
+      y+=rowH;
+      // Player rows
+      ps.forEach(p=>{
+        const sc=t.scores?.[p.id]||[];
+        x=10;
+        drawCell(x,y,nameW,rowH,"#fff",p.name.length>14?p.name.substring(0,14)+"…":p.name,"#333",false,9);x+=nameW;
+        let pOut=0,pIn=0;
+        course.holes.forEach((h,i)=>{
+          const v=parseInt(sc[i])||0;
+          const bg=v?v<=h.par-2?"#1565c0":v===h.par-1?"#43a047":v===h.par?"#fff":v===h.par+1?"#ef9a9a":"#ef5350":"#f5f5f5";
+          const fg=v&&(v<=h.par-1||v>=h.par+1)?"#fff":"#333";
+          if(i<9){pOut+=v;drawCell(x,y,colW,rowH,bg,v||"","",false,9);}
+          else{pIn+=v;drawCell(x,y,colW,rowH,bg,v||"",fg,false,9);}
+          if(i===8){x+=colW;drawCell(x,y,colW,rowH,"#f0f4f0",pOut||"","#333",true,9);}
+          x+=colW;
+        });
+        drawCell(x,y,colW,rowH,"#f0f4f0",pIn||"","#333",true,9);x+=colW;
+        const tot=pOut+pIn;
+        drawCell(x,y,colW,rowH,"#e8f5e9",tot||"","#1b5e20",true,9);
+        y+=rowH;
+        // Score context color fix
+        ctx.fillStyle="";
+      });
+      y+=groupGap;
+    });
+    return canvas.toDataURL("image/png");
+  };
+
+  const sendWhatsApp=()=>{
+    // Generate and download scorecard image
+    try{
+      const imgData=generateScorecardImage();
+      const a=document.createElement("a");
+      a.href=imgData;
+      a.download=`${(t.name||"scorecard").replace(/\s+/g,"-")}-scorecard.png`;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+    }catch(e){console.warn("Scorecard image generation failed",e);}
+    // Build text results
+    const lines=[`🏌️ *${t.name} — Results*`,`📍 ${course.name}`,`📎 Scorecard image downloaded — attach to share`,``];
+    const sf=rankBy("stableford",true);
+    if(sf.length){
+      lines.push("*🏆 Individual Scores:*");
+      const nameW=Math.max(...sf.map(r=>r.playerName.length));
+      sf.forEach(r=>{
+        lines.push(`  ${r.pos}. ${r.playerName.padEnd(nameW)} — SF: ${String(r.stableford).padStart(2)} pts | Mod: ${String(r.modStableford).padStart(2)} pts (HC ${r.handicap})`);
+      });
+      lines.push(``);
+    }
+    if(pairResults.length){
+      lines.push("*⚔️ Ratha Ratha Pairs:*");
+      pairResults.forEach((r,i)=>{
+        const scoredHoles=r.holes.filter(h=>h.net1!==null);
+        const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+        const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+        const p1n=r.p1.name.split(" ")[0];const p2n=r.p2.name.split(" ")[0];
+        const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+        const ptsDiff=Math.abs(r.pts1-r.pts2);
+        const netWinnerWa=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+        const netDiff=Math.abs(totalNet1-totalNet2);
+        const waLocked=(t.lockedCards||[]).some(id=>t.groups?.some(g=>g.playerIds?.includes(r.p1.id)&&g.id===id));
+        const waVerb=waLocked?"wins":"leading";
+        const ptsPart=ptsWinner?`${ptsWinner} ${waVerb} by ${ptsDiff} pt${ptsDiff!==1?"s":""}`:null;
+        const netPart=netWinnerWa?`${netWinnerWa} ${waVerb} by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
+        let waSummary;
+        if(ptsPart&&netPart){
+          if(ptsWinner===netWinnerWa){waSummary=`${ptsWinner} ${waVerb} by ${ptsDiff} pt${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+          else{waSummary=`${ptsPart} · ${netPart}`;}
+        }
+        else if(ptsPart&&!netWinnerWa){waSummary=`${ptsPart} (Strokeplay tied)`;}
+        else if(netPart&&!ptsWinner){waSummary=`${netPart} (Stableford tied)`;}
+        else{waSummary="Stableford and Strokeplay tied";}
+        const hcNote=r.hcpDiff>0?` (+${r.hcpDiff} to ${r.p1Higher?p1n:p2n})`:"";
+        lines.push(`  Pair ${i+1}: ${r.p1.name} vs ${r.p2.name}${hcNote}`);
+        lines.push(`    ${r.pts1} – ${r.pts2} pts | Net: ${totalNet1} – ${totalNet2}`);
+        lines.push(`    ${waSummary}`);
+      });
+      lines.push(``);
+    }
+    if(teamResults.length){
+      if((t.teamFormat||"modSF")==="ryder"&&teamResults[0]){
+        const rc=teamResults[0];
+        lines.push("*🏆 Ryder Cup:*");
+        const toWin=Math.floor(rc.matchDetails.length/2)+0.5;
+        lines.push(`  ${rc.teamA.name} ${rc.ptsA} – ${rc.ptsB} ${rc.teamB.name}  (win target: ${toWin})`);
+        if(rc.winner) lines.push(`  🏆 ${rc.winner.name} win!`);
+        else lines.push(`  ${rc.ptsA===rc.ptsB?"All Square":rc.ptsA>rc.ptsB?rc.teamA.name:rc.teamB.name+" leading"}`);
+        lines.push(``);
+        lines.push("  *Match results:*");
+        rc.matchDetails.forEach(m=>{
+          const diff=Math.abs(m.mPtsA-m.mPtsB);
+          const upTeam=m.mPtsA>m.mPtsB?rc.teamA.name:m.mPtsB>m.mPtsA?rc.teamB.name:null;
+          const status=upTeam?`${upTeam} ${diff%1===0?diff:diff.toFixed(1)} up`:"All Square";
+          const matchType=m.isDoubles?"Doubles":"Singles";
+          const players=m.isDoubles?`${m.p1a.name} & ${m.p1b.name} vs ${m.p2a.name} & ${m.p2b.name}`:`${m.p1.name} vs ${m.p2.name}`;
+          lines.push(`  Match ${m.matchNum} (${matchType}): ${players}`);
+          lines.push(`    ${status}`);
+        });
+      } else {
+        lines.push("*👥 Teams (Mod Stableford):*");
+        teamResults.forEach((r,i)=>lines.push(`  ${i+1}. ${r.team.name} — ${r.total} pts`));
+      }
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`,"_blank");
+  };
+
+  const tabs=[
+    {id:"individual",label:"All Players"},
+    {id:"scorecards",label:`Scorecards (${t.groups?.length||0})`},
+    {id:"pairs",label:`Ratha Ratha (${pairResults.length} pairs)`},
+    t.teams?.length&&{id:"teams",label:"Teams"},
+  ].filter(Boolean);
+
+  return(
+    <div>
+      <div className="ph">
+        <div className="ph-left">
+          <h2 style={{display:"flex",alignItems:"center",gap:8}}>
+            {isLive&&<span className="live-dot"/>}{t.name}
+          </h2>
+          <p>{course.name} {isLive?"· Live results":"· Final results"}</p>
+        </div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          <button className="btn btn-ghost" onClick={onBack}>← All</button>
+          <button className="btn btn-ghost btn-sm" onClick={onScoring}>🎯 Scoring</button>
+          <button className="btn btn-wa" onClick={sendWhatsApp}>📲 WhatsApp Results</button>
+        </div>
+      </div>
+
+      <div className="tabs">
+        {tabs.map(s=><div key={s.id} className={"tab"+(tab===s.id?" on":"")} onClick={()=>setTab(s.id)}>{s.label}</div>)}
+      </div>
+
+      {tab==="individual"&&(
+        <div>
+          {[
+            {key:"stableford",   label:"Stableford",            hi:true,  note:"Higher points wins"},
+            {key:"modStableford",label:"Mod Stableford (75%)",  hi:true,  note:"Higher points wins"},
+            {key:"strokeNet",    label:"Net Stroke Play",        hi:false, note:"Lower score wins"},
+          ].map(fmt=>{
+            const ranked=rankBy(fmt.key,fmt.hi);
+            if(!ranked.length)return null;
+            return(
+              <div key={fmt.key} className="card">
+                <div className="card-title">{fmt.label} <span style={{fontSize:11,color:"var(--gray-400)",fontWeight:400}}>{fmt.note}</span></div>
+                {ranked.map(r=>(
+                  <div key={r.playerId} className="lbrow">
+                    <div className={"lbpos"+(r.pos===1?" p1":r.pos===2?" p2":r.pos===3?" p3":" pn")}>{r.pos}</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600,fontSize:13.5}}>{r.playerName}</div>
+                      <div style={{fontSize:11,color:"var(--gray-400)"}}>HC {r.handicap} · Gross {r.gross||"—"}</div>
+                    </div>
+                    <div style={{fontFamily:"Playfair Display,serif",fontSize:22,fontWeight:700,color:"var(--green)"}}>{r[fmt.key]}</div>
+                    {r.pos===1&&<span style={{fontSize:18}}>🏆</span>}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab==="scorecards"&&(
+        <div>
+          {!t.groups?.length
+            ?<div className="card"><p style={{fontSize:13,color:"var(--gray-400)"}}>No groups in this tournament.</p></div>
+            :t.groups.map((g,gi)=>{
+              const players=data.players.filter(p=>g.playerIds?.includes(p.id));
+              const locked=(t.lockedCards||[]).includes(g.id);
+              const scoringNow=(t.scoringCards||[]).includes(g.id);
+              const hasScores=players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0));
+              return(
+                <div key={g.id} className="card">
+                  <div className="card-title" style={{alignItems:"center",gap:9}}>
+                    <span>Group {gi+1}: {players.map(p=>p.name).join(", ")||"Empty"}</span>
+                    {locked&&<span className="badge b-green" style={{marginLeft:8}}>🔒 Locked</span>}
+                    {locked&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,lockedCards:(x.lockedCards||[]).filter(id=>id!==g.id),scoringCards:(x.scoringCards||[]).filter(id=>id!==g.id)}));N("Card unlocked — scores preserved");}}> 🔓 Unlock</button>}
+                    {!locked&&scoringNow&&<span className="badge b-red" style={{marginLeft:8}}>⏳ In Progress</span>}
+                    {!locked&&scoringNow&&<button className="btn btn-sm btn-ghost" style={{marginLeft:6,fontSize:11,padding:"2px 8px"}} onClick={()=>{updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id],lockedCards:[...(x.lockedCards||[]),g.id]}));N("Card locked — scores preserved");}}>🔒 Lock</button>}
+                    {!locked&&!scoringNow&&!hasScores&&<span className="badge b-gray" style={{marginLeft:8}}>Pending</span>}
+                  </div>
+                  {hasScores?(
+                    <>
+                      <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={null} locked={true}/>
+                      <div style={{marginTop:12,overflowX:"auto"}}>
+                        <table className="dt" style={{fontSize:12.5}}>
+                          <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+                          <tbody>
+                            {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
+                              <tr key={r.playerId}>
+                                <td style={{fontWeight:600}}>{r.playerName}</td>
+                                <td>{r.handicap}</td>
+                                <td style={{fontWeight:700,color:"var(--green)"}}>{r.gross}</td>
+                                <td><span className="badge b-green">{r.stableford}</span></td>
+                                <td><span className="badge b-blue">{r.modStableford}</span></td>
+                                <td>{r.strokeNet}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ):(
+                    <p style={{fontSize:12.5,color:"var(--gray-400)",marginTop:8,fontStyle:"italic"}}>No scores entered yet.</p>
+                  )}
+                </div>
+              );
+            })
+          }
+        </div>
+      )}
+
+      {tab==="pairs"&&(
+        <div>
+          {!pairResults.length
+            ?<div className="card"><p style={{fontSize:13,color:"var(--gray-400)"}}>No pairs set up — add them in Tournament Setup.</p></div>
+            :pairResults.map((r,i)=>(
+              <div key={i} className="card">{(()=>{
+                const scoredHoles=r.holes.filter(h=>h.net1!==null);
+                const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+                const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+                const p1n=r.p1.name.split(" ")[0];
+                const p2n=r.p2.name.split(" ")[0];
+                const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+                const ptsDiff=Math.abs(r.pts1-r.pts2);
+                const netWinner=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+                const netDiff=Math.abs(totalNet1-totalNet2);
+                const cardLocked=(t.lockedCards||[]).some(id=>t.groups?.some(g=>g.playerIds?.includes(r.p1.id)&&g.id===id));
+                const verb=cardLocked?"wins":"leading";
+                const ptsPart=ptsWinner?`${ptsWinner} ${verb} by ${ptsDiff} point${ptsDiff!==1?"s":""}`:null;
+                const netWinnerName=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+                const netPart=netWinnerName?`${netWinnerName} ${verb} by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
+                let summary;
+                if(ptsPart&&netPart){
+                  if(ptsWinner===netWinnerName){summary=`${ptsWinner} ${verb} by ${ptsDiff} point${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+                  else{summary=`${ptsPart} · ${netPart}`;}
+                }
+                else if(ptsPart&&!netWinnerName){summary=`${ptsPart} (Strokeplay tied)`;}
+                else if(netPart&&!ptsWinner){summary=`${netPart} (Stableford tied)`;}
+                else if(!ptsWinner&&!netWinnerName){summary=null;}
+                else{summary=ptsPart||null;}
+                return(<>
+                <div className="card-title">
+                  <span>Pair {i+1}: {r.p1.name.split(" ")[0]} vs {r.p2.name.split(" ")[0]}</span>
+                  {r.hcpDiff>0?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.p1Higher?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>:null}
+                </div>
+                {/* Always-visible summary */}
+                <div style={{marginBottom:10,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
+                  {summary
+                    ?<span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>🏆 {summary}</span>
+                    :<span style={{fontSize:13,color:"var(--gray-400)",fontStyle:"italic"}}>🤝 Stableford and Strokeplay tied</span>
+                  }
+                </div>
+                {/* Expandable hole-by-hole toggle */}
+                <button onClick={()=>togglePair(i)} style={{width:"100%",background:"var(--gray-100)",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:600,color:"var(--gray-500)",cursor:"pointer",textAlign:"center",marginBottom:8}}>
+                  {expandedPairs.has(i)?"▲ Hide hole detail":"▼ Show hole by hole"}
+                </button>
+                {/* Hole-by-hole breakdown */}
+                {expandedPairs.has(i)&&(
+                  <div style={{overflowX:"auto",marginBottom:4}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr style={{background:"var(--green)",color:"white"}}>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Hole</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>SI</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Par</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p1n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p2n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Allow</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p1n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p2n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p1n} Net</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p2n} Net</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.holes.map((h,hi)=>{
+                          const scored=h.g1!==null&&h.g2!==null;
+                          const rowBg=hi%2===0?"#fafafa":"white";
+                          const p1wins=scored&&h.holeDiff>0;
+                          const p2wins=scored&&h.holeDiff<0;
+                          return(
+                            <tr key={hi} style={{background:rowBg}}>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700}}>{h.hole}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{h.si}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center"}}>{h.par}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p1wins?700:400,color:p1wins?"var(--green)":"inherit"}}>{h.g1??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p2wins?700:400,color:p2wins?"var(--green)":"inherit"}}>{h.g2??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{scored?(h.allow>0?"+1":"·"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p1wins?"var(--green)":"var(--gray-300)"}}>{scored?(p1wins?h.sf1:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p2wins?"var(--green)":"var(--gray-300)"}}>{scored?(p2wins?h.sf2:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net1:""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net2:""}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{background:"#1a4731",color:"white",fontWeight:700,fontSize:11}}>
+                          <td colSpan={6} style={{padding:"5px 6px",textAlign:"right",letterSpacing:.5}}>TOTAL</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts2}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet2}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                </>);
+              })()}</div>
+            ))
+          }
+        </div>
+      )}
+
+      {tab==="teams"&&(
+        <div>
+          {!teamResults.length
+            ?<div className="card"><p style={{fontSize:13,color:"var(--gray-400)"}}>No teams set up, or Ryder Cup matches not yet configured.</p></div>
+            :(t.teamFormat||"modSF")==="ryder"&&teamResults[0]?(()=>{
+              const r=teamResults[0];
+              const totalMatches=r.matchDetails.length;
+              const toWin=Math.floor(totalMatches/2)+0.5;
+              return(
+                <div>
+                  {/* Scoreboard */}
+                  <div className="card">
+                    <div className="card-title">🏆 Ryder Cup — Matchplay</div>
+                    <div style={{display:"flex",gap:16,justifyContent:"center",alignItems:"center",padding:"16px 0 10px",flexWrap:"wrap"}}>
+                      <div style={{textAlign:"center",flex:1,minWidth:100}}>
+                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:r.ptsA>=r.ptsB?"var(--green)":"var(--gray-400)"}}>{r.teamA.name}</div>
+                        <div style={{fontSize:40,fontWeight:800,lineHeight:1.1,color:r.ptsA>=r.ptsB?"var(--green)":"var(--gray-400)"}}>{r.ptsA}</div>
+                        <div style={{fontSize:11,color:"var(--gray-400)"}}>points</div>
+                      </div>
+                      <div style={{textAlign:"center"}}>
+                        <div style={{fontSize:12,color:"var(--gray-400)",fontWeight:600}}>Win target</div>
+                        <div style={{fontSize:22,fontWeight:800,color:"var(--gold)"}}>{toWin}</div>
+                      </div>
+                      <div style={{textAlign:"center",flex:1,minWidth:100}}>
+                        <div style={{fontFamily:"'Playfair Display',serif",fontSize:22,fontWeight:700,color:r.ptsB>r.ptsA?"var(--green)":"var(--gray-400)"}}>{r.teamB.name}</div>
+                        <div style={{fontSize:40,fontWeight:800,lineHeight:1.1,color:r.ptsB>r.ptsA?"var(--green)":"var(--gray-400)"}}>{r.ptsB}</div>
+                        <div style={{fontSize:11,color:"var(--gray-400)"}}>points</div>
+                      </div>
+                    </div>
+                    {r.winner
+                      ?<div style={{textAlign:"center",fontWeight:700,color:"var(--green)",fontSize:14,paddingBottom:8}}>🏆 {r.winner.name} wins {r.ptsA} – {r.ptsB}</div>
+                      :<div style={{textAlign:"center",color:"var(--gray-400)",fontSize:13,paddingBottom:8}}>{r.ptsA===r.ptsB?"All Square":r.ptsA>r.ptsB?r.teamA.name:r.teamB.name+" leading"}</div>
+                    }
+                    {/* Match summary rows */}
+                    <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:8}}>
+                      {r.matchDetails.map((m,i)=>{
+                        const holesPlayed=m.holeDetail.filter(h=>h.result!==null).length;
+                        const diff=Math.abs(m.mPtsA-m.mPtsB);
+                        const upTeam=m.mPtsA>m.mPtsB?r.teamA.name:m.mPtsB>m.mPtsA?r.teamB.name:null;
+                        const statusLabel=upTeam?`${upTeam} ${diff%1===0?diff:diff.toFixed(1)} up`:"All Square";
+                        const statusColour=m.mPtsA>m.mPtsB?"b-green":m.mPtsB>m.mPtsA?"b-red":"b-gray";
+                        const matchLabel=m.isDoubles?`${m.p1a.name} & ${m.p1b.name} vs ${m.p2a.name} & ${m.p2b.name}`:`${m.p1.name} vs ${m.p2.name}`;
+                        const matchType=m.isDoubles?"👥 Doubles":"Singles";
+                        return(
+                          <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 2px",borderBottom:i<r.matchDetails.length-1?"1px solid var(--gray-100)":"none",flexWrap:"wrap"}}>
+                            <span style={{fontSize:11,fontWeight:700,color:"var(--gray-400)",width:56,flexShrink:0}}>Match {m.matchNum}</span>
+                            <span style={{flex:1,fontSize:12,fontWeight:600}}>{matchLabel}</span>
+                            <span style={{fontSize:10,color:"var(--gray-400)"}}>{matchType} · {holesPlayed} holes</span>
+                            <span className={"badge "+statusColour} style={{minWidth:100,justifyContent:"center"}}>{statusLabel}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Per-match detail cards */}
+                  {r.matchDetails.map((m,i)=>(
+                    <div key={i} className="card">
+                      <div className="card-title" style={{fontSize:13,flexWrap:"wrap",gap:6}}>
+                        <span>Match {m.matchNum}{m.isDoubles?" 👥 Doubles":" Singles"}: {m.isDoubles?`${m.p1a.name} & ${m.p1b.name}`:`${m.p1.name}`} <span style={{color:"var(--gray-400)",fontSize:11,fontWeight:400}}>({r.teamA.name})</span> vs {m.isDoubles?`${m.p2a.name} & ${m.p2b.name}`:`${m.p2.name}`} <span style={{color:"var(--gray-400)",fontSize:11,fontWeight:400}}>({r.teamB.name})</span></span>
+                        {m.isDoubles?<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)"}}>75% HC · best net score counts per hole</span>:m.hcpDiff>0&&<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)"}}>Full HC · +{m.hcpDiff} strokes to {m.p1.handicap>m.p2.handicap?m.p1.name:m.p2.name}</span>}
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        {m.isDoubles?(
+                          <table className="sct" style={{minWidth:560,fontSize:11}}>
+                            <thead><tr>
+                              <th style={{minWidth:95,textAlign:"left",paddingLeft:8}}>Player</th>
+                              {m.holeDetail.map(h=><th key={h.hole}>{h.hole}</th>)}
+                              <th style={{background:"#144024"}}>Pts</th>
+                            </tr></thead>
+                            <tbody>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1a.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1a.handicap} (75%={m.hcp1a}) · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net1a!==undefined&&h.net1a<=h.net1b?1:0.45}}>{h.g1a||"—"}</td>)}
+                                <td rowSpan={2} style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)",verticalAlign:"middle"}}>{m.p1TeamA?m.mPtsA:m.mPtsB}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1b.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1b.handicap} (75%={m.hcp1b}) · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net1b!==undefined&&h.net1b<h.net1a?1:0.45}}>{h.g1b||"—"}</td>)}
+                              </tr>
+                              <tr style={{borderTop:"2px solid var(--gray-200)"}}>
+                                <td style={{fontWeight:600}}>{m.p2a.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2a.handicap} (75%={m.hcp2a}) · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net2a!==undefined&&h.net2a<=h.net2b?1:0.45}}>{h.g2a||"—"}</td>)}
+                                <td rowSpan={2} style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)",verticalAlign:"middle"}}>{m.p1TeamA?m.mPtsB:m.mPtsA}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p2b.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2b.handicap} (75%={m.hcp2b}) · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":"",opacity:h.net2b!==undefined&&h.net2b<h.net2a?1:0.45}}>{h.g2b||"—"}</td>)}
+                              </tr>
+                            </tbody>
+                          </table>
+                        ):(
+                          <table className="sct" style={{minWidth:560,fontSize:11}}>
+                            <thead><tr>
+                              <th style={{minWidth:95,textAlign:"left",paddingLeft:8}}>Player</th>
+                              {m.holeDetail.map(h=><th key={h.hole}>{h.hole}</th>)}
+                              <th style={{background:"#144024"}}>Pts</th>
+                            </tr></thead>
+                            <tbody>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p1.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p1.handicap} · {r.teamA.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="A"&&m.p1TeamA?"#e8f5e9":h.result==="B"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g1||"—"}</td>)}
+                                <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsA:m.mPtsB}</td>
+                              </tr>
+                              <tr>
+                                <td style={{fontWeight:600}}>{m.p2.name}<div style={{fontSize:9,color:"var(--gray-400)",fontWeight:400}}>HC {m.p2.handicap} · {r.teamB.name}</div></td>
+                                {m.holeDetail.map(h=><td key={h.hole} style={{background:h.result==="B"&&m.p1TeamA?"#e8f5e9":h.result==="A"&&!m.p1TeamA?"#e8f5e9":h.result==="H"?"#fffde7":""}}>{h.g2||"—"}</td>)}
+                                <td style={{background:"#e8f5e9",fontWeight:700,color:"var(--green)"}}>{m.p1TeamA?m.mPtsB:m.mPtsA}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                      <div style={{fontSize:10.5,color:"var(--gray-400)",marginTop:5,display:"flex",gap:14,flexWrap:"wrap"}}>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,background:"#e8f5e9",border:"1px solid #c8e6c9",borderRadius:2,display:"inline-block"}}></span>Hole won</span>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:10,height:10,background:"#fffde7",border:"1px solid #fff9c4",borderRadius:2,display:"inline-block"}}></span>Halved</span>
+                        {m.isDoubles&&<span>Faded = partner score counted</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()
+            :teamResults.map((r,i)=>(
+              <div key={r.team.id} className="card">
+                <div className="card-title">
+                  {i===0?"🏆 ":""}{r.team.name} — <span className="badge b-green">{r.total} pts</span>
+                  <span style={{fontSize:11,color:"var(--gray-400)",fontWeight:400,marginLeft:8}}>Modified Stableford (75% HC)</span>
+                </div>
+                {r.members.map(m=>(
+                  <div key={m.playerId} className="lbrow">
+                    <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{m.playerName}</div><div style={{fontSize:11,color:"var(--gray-400)"}}>HC {m.handicap}</div></div>
+                    <div style={{fontWeight:700,color:"var(--green)",fontSize:14}}>{m.gross>0?m.modStableford:"—"} pts</div>
+                  </div>
+                ))}
+              </div>
+            ))
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Autopress engine ──────────────────────────────────────────────────────────
+function calcAutopress(holeIdxs,teamA,teamB,scores,course){
+  function betterNet(team,hi){
+    return Math.min(...team.map(p=>{
+      const hc75=Math.round(p.handicap*0.75);
+      const allow=sa(hc75,course.holes[hi].si);
+      return (parseInt((scores[p.id]||[])[hi])||0)-allow;
+    }));
+  }
+  let matches=[{own:null,sc:0},{own:null,sc:0},{own:null,sc:0}];
+  let firstDone=false;
+  holeIdxs.forEach(hi=>{
+    const g1=parseInt((scores[teamA[0].id]||[])[hi])||0;
+    const g2=parseInt((scores[teamA[1]?.id]||[])[hi])||0;
+    const g3=parseInt((scores[teamB[0].id]||[])[hi])||0;
+    const g4=parseInt((scores[teamB[1]?.id]||[])[hi])||0;
+    if(!g1||!g3)return; // need scores from both teams
+    const nA=betterNet(teamA,hi),nB=betterNet(teamB,hi);
+    const res=nA<nB?"A":nB<nA?"B":"H";
+    if(res==="H")return;
+    if(!firstDone){
+      firstDone=true;
+      matches[0]={own:res,sc:1};
+      matches[1]={own:res==="A"?"B":"A",sc:1};
+      matches[2]={own:res,sc:1};
+    } else {
+      matches=matches.map(m=>{
+        if(!m.own)return{own:res,sc:1};
+        if(m.own===res)return{own:res,sc:m.sc+1};
+        const ns=m.sc-1;
+        return ns<=0?{own:res,sc:Math.abs(ns)}:{own:m.own,sc:ns};
+      });
+      if(matches[matches.length-1].sc===2)matches.push({own:null,sc:0});
+    }
+  });
+  let aW=0,bW=0;
+  matches.forEach(m=>{if(m.own==="A"&&m.sc>0)aW++;else if(m.own==="B"&&m.sc>0)bW++;});
+  return{aW,bW,net:aW-bW,state:matches.map(m=>m.sc).join("")};
+}
+
+function calcStraightMatchplay(holeIdxs,teamA,teamB,scores,course){
+  function betterNet(team,hi){
+    return Math.min(...team.map(p=>{
+      const hc75=Math.round(p.handicap*0.75);
+      const allow=sa(hc75,course.holes[hi].si);
+      return (parseInt((scores[p.id]||[])[hi])||0)-allow;
+    }));
+  }
+  let score=0;
+  holeIdxs.forEach(hi=>{
+    const g1=parseInt((scores[teamA[0].id]||[])[hi])||0;
+    const g3=parseInt((scores[teamB[0].id]||[])[hi])||0;
+    if(!g1||!g3)return;
+    const nA=betterNet(teamA,hi),nB=betterNet(teamB,hi);
+    if(nA<nB)score++; else if(nB<nA)score--;
+  });
+  const aW=Math.max(0,score),bW=Math.max(0,-score);
+  const stateStr=score>0?`A${Math.abs(score)}`:score<0?`B${Math.abs(score)}`:"AS";
+  return{aW,bW,net:score,state:stateStr};
+}
+
+// ── Standalone Scorecard Page ─────────────────────────────────────────────────
+function ScorecardPage({data,url,refresh}){
+  const [cid,setCid]=useState(()=>data.courses[0]?.id||null);
+  const [sel,setSel]=useState([]);
+  const [scores,setScores]=useState({});
+  const [done,setDone]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null);
+  // Match format
+  const [matchFmt,setMatchFmt]=useState("none"); // none | autopress | matchplay
+  const [teamA,setTeamA]=useState([]); // player ids
+  const [teamB,setTeamB]=useState([]); // player ids
+  const [teamsDone,setTeamsDone]=useState(false);
+  // Ratha Ratha pairs
+  const [rrPairs,setRrPairs]=useState([]);
+  const [expandedPairs,setExpandedPairs]=useState(new Set());
+
+  const course=data.courses.find(c=>String(c.id)===String(cid));
+  const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
+
+  const toggle=p=>{
+    if(sel.find(x=>x.id===p.id)){
+      setSel(sel.filter(x=>x.id!==p.id));
+      setTeamA(teamA.filter(id=>id!==p.id));
+      setTeamB(teamB.filter(id=>id!==p.id));
+    }
+    else if(sel.length<4){setSel([...sel,p]);if(!scores[p.id])setScores(s=>({...s,[p.id]:Array(18).fill("")}));}
+    else N("Max 4 players per scorecard","warn");
+  };
+  const setScore=(pid,h,v)=>setScores(s=>({...s,[pid]:s[pid].map((x,i)=>i===h?v:x)}));
+
+  const resetTeams=()=>{setTeamA([]);setTeamB([]);setTeamsDone(false);};
+  const toggleTeam=(team,pid)=>{
+    if(team==="A"){
+      if(teamA.includes(pid)){setTeamA(teamA.filter(id=>id!==pid));}
+      else{setTeamA([...teamA.filter(id=>!teamB.includes(id)||true),pid]);setTeamB(teamB.filter(id=>id!==pid));}
+    } else {
+      if(teamB.includes(pid)){setTeamB(teamB.filter(id=>id!==pid));}
+      else{setTeamB([...teamB,pid]);setTeamA(teamA.filter(id=>id!==pid));}
+    }
+  };
+
+  const addRrPair=()=>setRrPairs(p=>[...p,{id:Date.now(),p1Id:null,p2Id:null,diff:null,higherPId:null}]);
+  const removeRrPair=(id)=>setRrPairs(p=>p.filter(x=>x.id!==id));
+  const setRrF=(id,k,v)=>setRrPairs(p=>p.map(x=>x.id===id?{...x,[k]:v}:x));
+  const togglePair=(i)=>setExpandedPairs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
+
+  // Computed results
+  const selResults=useMemo(()=>{
+    if(!course||!sel.length)return[];
+    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+  },[sel,scores,course]);
+
+  const tAPlayers=sel.filter(p=>teamA.includes(p.id));
+  const tBPlayers=sel.filter(p=>teamB.includes(p.id));
+  const canMatch=tAPlayers.length>=1&&tBPlayers.length>=1;
+
+  const matchResults=useMemo(()=>{
+    if(!course||!canMatch||matchFmt==="none")return null;
+    const fn=matchFmt==="autopress"?calcAutopress:calcStraightMatchplay;
+    const f9=fn([0,1,2,3,4,5,6,7,8],tAPlayers,tBPlayers,scores,course);
+    const b9=fn([9,10,11,12,13,14,15,16,17],tAPlayers,tBPlayers,scores,course);
+    const f18=fn([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17],tAPlayers,tBPlayers,scores,course);
+    return{f9,b9,f18};
+  // eslint-disable-next-line
+  },[matchFmt,canMatch,tAPlayers.map(p=>p.id).join(),tBPlayers.map(p=>p.id).join(),JSON.stringify(scores),course]);
+
+  const rrResults=useMemo(()=>{
+    if(!course||!rrPairs.length)return[];
+    return rrPairs.filter(rp=>rp.p1Id&&rp.p2Id).map(rp=>{
+      const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
+      const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
+      if(!p1||!p2)return null;
+      return calcPair({p1,p2,diff:rp.diff,higherPId:rp.higherPId},course,scores);
+    }).filter(Boolean);
+  // eslint-disable-next-line
+  },[rrPairs,JSON.stringify(scores),course]);
+
+  const tAName=tAPlayers.map(p=>p.name.split(" ")[0]).join("/");
+  const tBName=tBPlayers.map(p=>p.name.split(" ")[0]).join("/");
+
+  const fmtMatchResult=(r,label,isHalf)=>{
+    const winner=r.net>0?tAName:r.net<0?tBName:null;
+    const n=Math.abs(r.net);
+    const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+    const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+    const col=r.net>0?"var(--green)":r.net<0?"var(--blue)":"var(--gray-600)";
+    return(
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--gray-100)"}}>
+        <span style={{fontSize:13,fontWeight:600,color:"var(--gray-600)"}}>{label}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:13,fontWeight:700,color:col}}>{txt}</span>
+          <span style={{fontFamily:"monospace",fontSize:12,padding:"2px 8px",background:"var(--gray-50)",borderRadius:6,color:"var(--gray-500)"}}>{r.state}</span>
+        </div>
+      </div>
+    );
+  };
+
+  // WhatsApp & email
+  const buildWaText=()=>{
+    const lines=[];
+    if(matchResults){
+      const fmt=matchFmt==="autopress"?"🎯 Autopress":"⚔️ Straight Matchplay";
+      lines.push(`*${fmt} — ${tAName} vs ${tBName}:*`);
+      const fmtLine=(r,label,isHalf)=>{
+        const winner=r.net>0?tAName:r.net<0?tBName:null;
+        const n=Math.abs(r.net);
+        const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+        const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+        lines.push(`  ${label.padEnd(8)} — ${txt}  (${r.state})`);
+      };
+      fmtLine(matchResults.f9,"Front 9",true);
+      fmtLine(matchResults.b9,"Back 9",true);
+      fmtLine(matchResults.f18,"Full 18",false);
+      lines.push("");
+    }
+    if(rrResults.length){
+      lines.push("*⚔️ Ratha Ratha:*");
+      rrResults.forEach((r,i)=>{
+        const p1n=r.p1.name.split(" ")[0],p2n=r.p2.name.split(" ")[0];
+        const scoredHoles=r.holes.filter(h=>h.net1!==null);
+        const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+        const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+        const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+        const ptsDiff=Math.abs(r.pts1-r.pts2);
+        const netWinner=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+        const netDiff=Math.abs(totalNet1-totalNet2);
+        let summary;
+        if(ptsWinner&&netWinner){
+          if(ptsWinner===netWinner){summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+          else{summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} · ${netWinner} leads by ${netDiff} stroke${netDiff!==1?"s":""}`;}
+        } else if(ptsWinner){summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} (Strokeplay tied)`;}
+        else if(netWinner){summary=`${netWinner} leads by ${netDiff} stroke${netDiff!==1?"s":""} (Stableford tied)`;}
+        else{summary="All square";}
+        lines.push(`  Pair ${i+1}: ${r.p1.name} vs ${r.p2.name} — ${summary}`);
+      });
+    }
+    return lines.join("\n");
+  };
+
+  const sendWhatsApp=()=>{
+    const txt=buildWaText();
+    if(!txt)return N("No results to share yet","warn");
+    window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`,"_blank");
+  };
+
+  const doSubmit=async(emailAddr)=>{
+    setEmailDlg(false);
+    if(!course||!sel.length)return N("Select a course and at least one player","error");
+    setBusy(true);
+    try{
+      const date=new Date().toISOString().split("T")[0];
+      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+      if(url){
+        await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
+        await refresh();
+      }
+      if(emailAddr.trim()){
+        const dateStr=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+        const subject=encodeURIComponent(`Scorecard — ${course.name} — ${dateStr}`);
+        const body=encodeURIComponent(`Scorecard for ${course.name} on ${dateStr}\n\n${buildWaText().replace(/\*/g,"")}`);
+        window.open(`mailto:${emailAddr.trim()}?subject=${subject}&body=${body}`);
+      }
+      N("Scores saved ✔");
+      setDone(true);
+    }catch(e){N("Error: "+e.message,"error");}
+    setBusy(false);
+  };
+
+  const submit=()=>{
+    if(!canSubmit)return N("Need at least 14 holes scored for 2 or more players","warn");
+    setEmailDlg(true);
+  };
+
+  if(!data.courses.length)return(
+    <div><div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Add a course first</p></div></div>
+      <div className="card"><p style={{color:"var(--gray-400)",fontSize:13}}>No courses available. Add one in the Courses tab.</p></div>
+    </div>
+  );
+
+  const hasResults=selResults.some(r=>r.gross>0);
+  const canSubmit=selResults.filter(r=>{
+    const sc=scores[r.playerId]||[];
+    return sc.filter(v=>parseInt(v)>0).length>=14;
+  }).length>=2;
+  const [emailDlg,setEmailDlg]=useState(false);
+  const [emailVal,setEmailVal]=useState("tour.kga.in");
+
+  return(
+    <div>
+      <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard</p></div></div>
+      {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
+
+      {/* ── Setup ── */}
+      <div className="card">
+        <div className="card-title">Setup</div>
+        <div className="fg fg2" style={{marginBottom:12}}>
+          <div className="ff"><label>Course</label>
+            <select value={cid||""} onChange={e=>{setCid(e.target.value);setDone(false);}}>
+              {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="ff"><label>Date</label>
+            <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
+          </div>
+        </div>
+
+        <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
+        <div className="psel" style={{marginBottom:16}}>
+          {data.players.map(p=>(
+            <div key={p.id} className={"pchip"+(sel.find(x=>x.id===p.id)?" on":"")} onClick={()=>toggle(p)}>
+              <span>{sel.find(x=>x.id===p.id)?"✓":"○"}</span>
+              <span style={{flex:1}}>{p.name}</span><span className="hc">{p.handicap}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Match format */}
+        <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginBottom:matchFmt!=="none"?12:0}}>
+          <div className="section-title" style={{marginBottom:8}}>Match format</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+            {["none","autopress","matchplay"].map(f=>(
+              <button key={f} onClick={()=>{setMatchFmt(f);if(f!==matchFmt)setTeamsDone(false);}}
+                style={{padding:"5px 14px",borderRadius:7,border:"1.5px solid",fontSize:12,fontWeight:600,cursor:"pointer",
+                  background:matchFmt===f?"var(--green)":"white",
+                  color:matchFmt===f?"white":"var(--gray-600)",
+                  borderColor:matchFmt===f?"var(--green)":"var(--gray-200)"}}>
+                {f==="none"?"None":f==="autopress"?"Autopress":"Straight matchplay"}
+              </button>
+            ))}
+          </div>
+          {matchFmt!=="none"&&sel.length>=2&&(
+            <div>
+              {teamsDone?(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:"#e8f5e9",borderRadius:8}}>
+                  <span style={{fontSize:12.5,color:"var(--green)",fontWeight:600}}>
+                    {tAPlayers.map(p=>p.name.split(" ")[0]).join(" & ")} vs {tBPlayers.map(p=>p.name.split(" ")[0]).join(" & ")}
+                  </span>
+                  <button className="btn btn-sm btn-ghost" onClick={()=>setTeamsDone(false)}>Edit</button>
+                </div>
+              ):(
+                <div>
+                  <div className="fg fg2" style={{marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:11,color:"var(--green)",fontWeight:700,marginBottom:5}}>Team A</div>
+                      {sel.map(p=>(
+                        <div key={p.id} className={"pchip"+(teamA.includes(p.id)?" on":"")}
+                          style={{marginBottom:4,background:teamA.includes(p.id)?"#e8f5e9":"white",borderColor:teamA.includes(p.id)?"var(--green)":"var(--gray-200)"}}
+                          onClick={()=>toggleTeam("A",p.id)}>
+                          <span style={{flex:1,fontSize:12}}>{p.name}</span>
+                          <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,color:"var(--blue)",fontWeight:700,marginBottom:5}}>Team B</div>
+                      {sel.map(p=>(
+                        <div key={p.id} className={"pchip"+(teamB.includes(p.id)?" on":"")}
+                          style={{marginBottom:4,background:teamB.includes(p.id)?"#e3f2fd":"white",borderColor:teamB.includes(p.id)?"var(--blue)":"var(--gray-200)"}}
+                          onClick={()=>toggleTeam("B",p.id)}>
+                          <span style={{flex:1,fontSize:12}}>{p.name}</span>
+                          <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {tAPlayers.length>=1&&tBPlayers.length>=1&&(
+                    <button className="btn btn-primary btn-sm" style={{width:"100%"}} onClick={()=>setTeamsDone(true)}>Done ✓</button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Ratha Ratha */}
+        <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginTop:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div className="section-title">Ratha Ratha pairs (optional)</div>
+            <button className="btn btn-sm btn-primary" onClick={addRrPair}>+ Add pair</button>
+          </div>
+          {rrPairs.map((rp,pi)=>{
+            const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
+            const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
+            const curDiff=rp.diff!=null?rp.diff:null;
+            const higherName=rp.higherPId?(String(rp.higherPId)===String(rp.p1Id)?p1?.name:p2?.name):null;
+            return(
+              <div key={rp.id} className="pair-card">
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontWeight:700,fontSize:12,color:"var(--green)"}}>Pair {pi+1}</span>
+                  <button className="btn btn-sm btn-danger" onClick={()=>removeRrPair(rp.id)}>Remove</button>
+                </div>
+                <div className="fg fg2" style={{marginBottom:8}}>
+                  <div className="ff"><label>Player A</label>
+                    <select value={rp.p1Id||""} onChange={e=>setRrF(rp.id,"p1Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="ff"><label>Player B</label>
+                    <select value={rp.p2Id||""} onChange={e=>setRrF(rp.id,"p2Id",e.target.value||null)}>
+                      <option value="">— Select —</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {p1&&p2&&(
+                  <div className="fg fg2">
+                    <div className="ff"><label>HC differential</label>
+                      <input type="number" inputMode="numeric" min="0" max="36"
+                        value={curDiff!=null?String(curDiff):""}
+                        onChange={e=>setRrF(rp.id,"diff",e.target.value===""?null:parseInt(e.target.value)||0)}
+                        placeholder="0"/>
+                    </div>
+                    <div className="ff"><label>Strokes given to</label>
+                      <select value={rp.higherPId||""} onChange={e=>setRrF(rp.id,"higherPId",e.target.value||null)}>
+                        <option value="">— Select —</option>
+                        <option value={String(rp.p1Id)}>{p1.name}</option>
+                        <option value={String(rp.p2Id)}>{p2.name}</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                {p1&&p2&&curDiff!=null&&higherName&&(
+                  <div style={{marginTop:8,padding:"6px 10px",background:"#e8f5e9",borderRadius:7,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:12,fontWeight:700,color:"var(--green)"}}>{higherName} receives {curDiff} stroke{curDiff!==1?"s":""}</span>
+                    <span style={{fontSize:11,color:"var(--gray-400)"}}>by SI</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!rrPairs.length&&<p style={{fontSize:12,color:"var(--gray-400)"}}>No pairs yet.</p>}
+        </div>
+      </div>
+
+      {/* ── Email dialog ── */}
+      {emailDlg&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"white",borderRadius:14,padding:"22px 20px",maxWidth:360,width:"100%",boxShadow:"0 8px 32px rgba(0,0,0,.2)"}}>
+            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"var(--green)",marginBottom:6}}>Send Scorecard</div>
+            <p style={{fontSize:13,color:"var(--gray-600)",marginBottom:14,lineHeight:1.5}}>Enter email address(es) to send to. Separate multiple with commas.</p>
+            <input value={emailVal} onChange={e=>setEmailVal(e.target.value)}
+              style={{width:"100%",marginBottom:14,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--gray-200)",fontSize:13}}
+              placeholder="email@example.com"/>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setEmailDlg(false)}>Cancel</button>
+              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>doSubmit(emailVal)} disabled={busy}>
+                {busy?<><Spin/>Sending…</>:"✉ Send & Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Scorecard grid ── */}
+      {sel.length>0&&course&&(
+        <div className="card">
+          <div className="card-title">{course.name}</div>
+          <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
+          {!done?(
+            <div className="btn-row" style={{marginTop:12}}>
+              <button className="btn btn-primary" onClick={submit} disabled={busy}
+                style={{opacity:canSubmit?1:0.5}}
+                title={canSubmit?"":"Need 14+ holes for 2+ players"}>
+                {busy?<><Spin/>Saving…</>:"Submit & Email"}
+              </button>
+              <button className="btn btn-wa" onClick={sendWhatsApp}>📲 WhatsApp</button>
+            </div>
+          ):(
+            <div className="alert alert-ok" style={{marginTop:12}}>
+              ✓ Submitted!
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);}}>New Card</button>
+              <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Results ── */}
+      {hasResults&&(
+        <div>
+          {/* Match results */}
+          {matchResults&&canMatch&&(
+            <div className="card">
+              <div className="card-title">
+                {matchFmt==="autopress"?"🎯 Autopress":"⚔️ Straight matchplay"}
+                <span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>{tAName} vs {tBName}</span>
+              </div>
+              {fmtMatchResult(matchResults.f9,"Front 9",true)}
+              {fmtMatchResult(matchResults.b9,"Back 9",true)}
+              <div style={{borderBottom:"none"}}>{fmtMatchResult(matchResults.f18,"Full 18",false)}</div>
+            </div>
+          )}
+
+          {/* Ratha Ratha results */}
+          {rrResults.map((r,i)=>{
+            const p1n=r.p1.name.split(" ")[0],p2n=r.p2.name.split(" ")[0];
+            const scoredHoles=r.holes.filter(h=>h.net1!==null);
+            const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+            const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+            const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+            const ptsDiff=Math.abs(r.pts1-r.pts2);
+            const netWinnerName=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+            const netDiff=Math.abs(totalNet1-totalNet2);
+            const netPart=netWinnerName?`${netWinnerName} leads by ${netDiff} stroke${netDiff!==1?"s":""}`:null;
+            const ptsPart=ptsWinner?`${ptsWinner} leads by ${ptsDiff} point${ptsDiff!==1?"s":""}`:null;
+            let summary;
+            if(ptsPart&&netPart){
+              if(ptsWinner===netWinnerName){summary=`${ptsWinner} leads by ${ptsDiff} point${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;}
+              else{summary=`${ptsPart} · ${netPart}`;}
+            } else if(ptsPart&&!netWinnerName){summary=`${ptsPart} (Strokeplay tied)`;}
+            else if(netPart&&!ptsWinner){summary=`${netPart} (Stableford tied)`;}
+            else{summary=null;}
+            return(
+              <div key={i} className="card">
+                <div className="card-title">
+                  <span>Pair {i+1}: {r.p1.name.split(" ")[0]} vs {r.p2.name.split(" ")[0]}</span>
+                  {r.hcpDiff>0&&<span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>(+{r.hcpDiff} to {r.p1Higher?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]})</span>}
+                </div>
+                <div style={{marginBottom:10,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
+                  {summary
+                    ?<span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>🏆 {summary}</span>
+                    :<span style={{fontSize:13,color:"var(--gray-400)",fontStyle:"italic"}}>🤝 All square</span>
+                  }
+                </div>
+                <button onClick={()=>togglePair(i)} style={{width:"100%",background:"var(--gray-100)",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:600,color:"var(--gray-500)",cursor:"pointer",textAlign:"center",marginBottom:8}}>
+                  {expandedPairs.has(i)?"▲ Hide hole detail":"▼ Show hole by hole"}
+                </button>
+                {expandedPairs.has(i)&&(
+                  <div style={{overflowX:"auto",marginBottom:4}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                      <thead>
+                        <tr style={{background:"var(--green)",color:"white"}}>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Hole</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>SI</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Par</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p1n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>{p2n}</th>
+                          <th style={{padding:"4px 5px",textAlign:"center"}}>Allow</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p1n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#a8ffc4"}}>{p2n} Pts</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p1n} Net</th>
+                          <th style={{padding:"4px 5px",textAlign:"center",color:"#ffd580"}}>{p2n} Net</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {r.holes.map((h,hi)=>{
+                          const scored=h.g1!==null&&h.g2!==null;
+                          const rowBg=hi%2===0?"#fafafa":"white";
+                          const p1wins=scored&&h.holeDiff>0;
+                          const p2wins=scored&&h.holeDiff<0;
+                          return(
+                            <tr key={hi} style={{background:rowBg}}>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700}}>{h.hole}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{h.si}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center"}}>{h.par}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p1wins?700:400,color:p1wins?"var(--green)":"inherit"}}>{h.g1??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p2wins?700:400,color:p2wins?"var(--green)":"inherit"}}>{h.g2??""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{scored?(h.allow>0?"+1":"·"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p1wins?"var(--green)":"var(--gray-300)"}}>{scored?(p1wins?h.sf1:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p2wins?"var(--green)":"var(--gray-300)"}}>{scored?(p2wins?h.sf2:"—"):""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net1:""}</td>
+                              <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net2:""}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{background:"#1a4731",color:"white",fontWeight:700,fontSize:11}}>
+                          <td colSpan={6} style={{padding:"5px 6px",textAlign:"right",letterSpacing:.5}}>TOTAL</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts2}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet1}</td>
+                          <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet2}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── App Shell ─────────────────────────────────────────────────────────────────
+const NAV=[
+  {id:"players",    ico:"👤", label:"Players"},
+  {id:"courses",    ico:"⛳", label:"Courses"},
+  {id:"scorecard",  ico:"📋", label:"Scorecard"},
+  {id:"tournaments",ico:"🏆", label:"Tournaments"},
+  {id:"setup",      ico:"⚙️",  label:"Setup"},
+];
+
+function App(){
+  const [page,setPage]=useState(()=>{
+    // Always go to tournaments - GAS URL is hardcoded so setup is never needed on first load
+    const hasHash=window.location.hash&&window.location.hash.includes("url=");
+    return (localStorage.getItem(LS_URL)||hasHash||true)?"tournaments":"setup";
+  });
+  const DEFAULT_GAS="https://script.google.com/macros/s/AKfycbxSjwX5TkBaVqovp21rQhLnXwIOIolxMq_pmTPAXOPr2P2hGoJkT6Gyb9v5eiQpckwH/exec";
+  const [url,setUrl]=useState(()=>{
+    // Check URL hash for shared link: #url=GAS_URL
+    try{
+      const h=decodeURIComponent(window.location.hash||"");
+      const m=h.match(/[#&]url=([^&]+)/);
+      if(m&&m[1]){
+        const sharedUrl=m[1];
+        localStorage.setItem(LS_URL,sharedUrl);
+        history.replaceState(null,"",window.location.pathname+window.location.search);
+        return sharedUrl;
+      }
+    }catch(_){}
+    // Fall back to saved URL, then hardcoded default
+    return localStorage.getItem(LS_URL)||DEFAULT_GAS;
+  });
+  const [data,setData]=useState(()=>{try{const c=localStorage.getItem(LS_DATA);return c?JSON.parse(c):DEFAULT_DATA;}catch{return DEFAULT_DATA;}});
+  const [loading,setLoading]=useState(true); // always show loading until GAS responds
+  const [status,setStatus]=useState(()=>{
+    const u=localStorage.getItem(LS_URL);
+    if(!u)return"none";
+    // If we have a previously successful connection, start as ok (sync in background)
+    return localStorage.getItem("llg_connected")?"ok":"busy";
+  });
+  const [admin,setAdmin]=useState(()=>localStorage.getItem(LS_AUTH)||null);
+  const [showLogin,setShowLogin]=useState(false);
+
+  const testAndLoad=useCallback(async(u)=>{
+    if(!u){setLoading(false);return;}
+    setStatus("busy");
+    // Fallback: if GAS takes >12s, show cached data rather than hang forever
+    const timeout=setTimeout(()=>setLoading(false),12000);
+    try{
+      const r=await apiGet(u,"getAll");
+      const merged={players:r.players?.length?r.players:data.players,courses:r.courses?.length?r.courses:data.courses,scores:r.scores||[],tournaments:r.tournaments||[]};
+      setData(merged);localStorage.setItem(LS_DATA,JSON.stringify(merged));
+      localStorage.setItem("llg_connected","1");setStatus("ok");
+    }catch(e){console.error(e);setStatus("err");}
+    clearTimeout(timeout);
+    setLoading(false);
+  },[]);
+
+  const refresh=useCallback(async()=>{
+    if(!url)return;setStatus("busy");
+    try{
+      const r=await apiGet(url,"getAll");
+      const merged={players:r.players?.length?r.players:data.players,courses:r.courses?.length?r.courses:data.courses,scores:r.scores||[],tournaments:r.tournaments||[]};
+      setData(merged);localStorage.setItem(LS_DATA,JSON.stringify(merged));
+      localStorage.setItem("llg_connected","1");setStatus("ok");
+    }catch(e){setStatus("err");}
+  },[url]);
+
+  useEffect(()=>{testAndLoad(url);},[]);
+
+  // Show splash/loading screen until GAS responds on every open
+  if(loading)return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",background:"var(--green)",gap:16}}>
+      <img src={LOGO_SRC} style={{width:90,height:90,borderRadius:"50%",border:"3px solid var(--gold-light)"}}/>
+      <div style={{fontFamily:"Playfair Display,serif",fontSize:20,fontWeight:700,color:"var(--gold-light)"}}>Lucky Last Golfers</div>
+      <div style={{display:"flex",alignItems:"center",gap:8,color:"rgba(255,255,255,.6)",fontSize:13}}>
+        <span className="spinner"/>Syncing data…
+      </div>
+    </div>
+  );
+
+  const navClick=(id)=>{
+    if(id==="setup"){
+      if(admin)setPage("setup");
+      else setShowLogin(true);
+    }else{
+      setPage(id);
+    }
+  };
+
+  const sc=status==="ok"?"sync-ok":status==="err"?"sync-err":status==="busy"?"sync-busy":"sync-none";
+  const dc=status==="ok"?"dot-ok":status==="err"?"dot-err":status==="busy"?"dot-busy":"dot-none";
+
+  return(
+    <div className="app">
+      {showLogin&&<LoginModal onLogin={(e)=>{setAdmin(e);localStorage.setItem(LS_AUTH,e);setShowLogin(false);setPage("setup");}} onCancel={()=>setShowLogin(false)}/>}
+      <nav className="sidebar">
+        <div className="sidebar-logo" onClick={()=>setPage("players")}>
+          <img src={LOGO_SRC} alt="Lucky Last Golfers"/>
+          <div className="sidebar-logo-text">
+            <h1>Lucky Last Golfers</h1>
+            <p>{APP_VERSION} · EST. 2024</p>
+          </div>
+        </div>
+        <div className={"sync-pill "+sc}>
+          <div className={"dot "+dc}/>
+          <span>{status==="ok"?"Synced":status==="busy"?"Syncing…":"Not synced"}</span>
+        </div>
+        <div className="nav-section">
+          <div className="nav-label">Navigation</div>
+          {NAV.map(n=>(
+            <div key={n.id} className={"nav-item"+(page===n.id?" active":"")} onClick={()=>navClick(n.id)}>
+              <span className="ico">{n.ico}</span><span>{n.label}</span>
+            </div>
+          ))}
+        </div>
+      </nav>
+      <main className="content">
+        {!url&&page!=="setup"&&(
+          <div className="alert alert-info" style={{marginBottom:14}}>
+            ℹ️ Connect to Google Sheets to sync data.{" "}
+            <span style={{cursor:"pointer",textDecoration:"underline",fontWeight:700}} onClick={()=>navClick("setup")}>Set up →</span>
+          </div>
+        )}
+        {url&&status==="err"&&page!=="setup"&&(
+          <div className="alert alert-warn" style={{marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+            <span>⚠️ Could not sync — showing cached data</span>
+            <button className="btn btn-sm btn-ghost" style={{flexShrink:0}} onClick={()=>testAndLoad(url)}>↻ Retry</button>
+          </div>
+        )}
+        {page==="players"    &&<PlayersPage    data={data} url={url} refresh={refresh} setData={setData}/>}
+        {page==="courses"    &&<CoursesPage    data={data} url={url} refresh={refresh} setData={setData}/>}
+        {page==="scorecard"  &&<ScorecardPage  data={data} url={url} refresh={refresh}/>}
+        {page==="tournaments"&&<TournamentPage data={data} url={url} refresh={refresh}/>}
+        {page==="setup"      &&<SetupPage      url={url} setUrl={setUrl} onTest={testAndLoad} status={status} admin={admin} onLogout={()=>{setAdmin(null);localStorage.removeItem(LS_AUTH);setPage("players");}}/>}
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+
+</script>
+</body>
+</html>
