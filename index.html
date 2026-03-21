@@ -314,6 +314,20 @@ async function apiPost(url,action,data){
   await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action,data})});
   await new Promise(r=>setTimeout(r,2000));
 }
+async function apiPostRead(url,action,data){
+  // POST that can read the response — GAS must return CORS headers
+  // Falls back to cache-based JSONP if direct read fails
+  const token="_r"+Date.now();
+  try{
+    const r=await fetch(url,{method:"POST",body:JSON.stringify({action,data,token})});
+    const txt=await r.text();
+    const j=JSON.parse(txt);
+    if(j&&!j.error)return j;
+  }catch(e){}
+  // Fallback: poll cache via JSONP GET
+  await new Promise(r=>setTimeout(r,1500));
+  return await jsonpGet(url,"getSearchResult&token="+token);
+}
 
 // ── Scoring ───────────────────────────────────────────────────────────────────
 function sa(hcp,si){const h=Math.round(hcp);return Math.floor(h/18)+(si<=(h%18)?1:0);}
@@ -574,10 +588,10 @@ const GAS=`// Lucky Last Golfers — Google Apps Script
 // Web app | Execute as: Me | Who has access: Anyone
 
 function cr(d,cb){if(cb)return ContentService.createTextOutput(cb+"("+JSON.stringify(d)+")").setMimeType(ContentService.MimeType.JAVASCRIPT);return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);}
-function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;Logger.log("doGet action="+a+" params="+JSON.stringify(e.parameter));try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="ping")return cr({ok:true,version:"v2-searchCourses",time:new Date().toISOString()},cb);if(a==="searchCourses"){Logger.log("searchCourses called name="+e.parameter.name);var sr=searchCourses({name:e.parameter.name||"",location:e.parameter.location||""});Logger.log("searchCourses result="+JSON.stringify(sr).slice(0,200));return cr(sr,cb);}Logger.log("Unknown action: "+a);return cr({error:"Unknown: "+a},cb);}catch(err){Logger.log("doGet error: "+err.toString());return cr({error:err.toString()},cb);}}
+function doGet(e){var a=e.parameter.action,cb=e.parameter.callback||null;Logger.log("doGet action="+a+" params="+JSON.stringify(e.parameter));try{if(a==="getAll")return cr(getAll(),cb);if(a==="getAdmins")return cr(getAdmins(),cb);if(a==="getScorecardResult")return cr(getScorecardResult(e.parameter.token||""),cb);if(a==="ping")return cr({ok:true,version:"v3-cacheSearch",time:new Date().toISOString()},cb);if(a==="getSearchResult"){var tok=e.parameter.token||"";var cached=CacheService.getScriptCache().get(tok);return cr(cached?JSON.parse(cached):{error:"No result yet"},cb);}if(a==="searchCourses"){Logger.log("searchCourses called name="+e.parameter.name);var sr=searchCourses({name:e.parameter.name||"",location:e.parameter.location||""});Logger.log("searchCourses result="+JSON.stringify(sr).slice(0,200));return cr(sr,cb);}Logger.log("Unknown action: "+a);return cr({error:"Unknown: "+a},cb);}catch(err){Logger.log("doGet error: "+err.toString());return cr({error:err.toString()},cb);}}
 function doPost(e){try{var p=JSON.parse(e.postData.contents);if(p.action==="addPlayer")return cr(addPlayer(p.data));if(p.action==="updatePlayer")return cr(updatePlayer(p.data));if(p.action==="deletePlayer")return cr(deleteRow("Players",p.data.id));if(p.action==="addCourse")return cr(addCourse(p.data));if(p.action==="updateCourse")return cr(updateCourse(p.data));if(p.action==="deleteCourse")return cr(deleteRow("Courses",p.data.id));if(p.action==="addScores")return cr(addScores(p.data));
 if(p.action==="saveTournaments")return cr(saveTournaments(p.data));
-if(p.action==="searchCourses")return cr(searchCourses(p.data));if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
+if(p.action==="searchCourses"){var sr2=searchCourses(p.data);if(p.token)CacheService.getScriptCache().put(p.token,JSON.stringify(sr2),60);return cr(sr2);}if(p.action==="extractScorecard"){var r=extractScorecard(p.data);if(p.data.token){CacheService.getScriptCache().put(p.data.token,JSON.stringify(r),120);}return cr(r);}return cr({error:"Unknown: "+p.action});}catch(err){return cr({error:err.toString()});}}
 function sheet(n,h){var ss=SpreadsheetApp.getActiveSpreadsheet(),s=ss.getSheetByName(n);if(!s){s=ss.insertSheet(n);s.appendRow(h);s.getRange(1,1,1,h.length).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}else{var cur=s.getLastColumn();if(cur<h.length){var missing=h.slice(cur);s.getRange(1,cur+1,1,missing.length).setValues([missing]).setBackground("#1a4731").setFontColor("#fff").setFontWeight("bold");}}return s;}
 function PS(){return sheet("Players",["ID","Name","Email","Handicap"]);}
 function CS(){var h=[];for(var i=1;i<=18;i++)h.push("H"+i+"_Par","H"+i+"_SI");return sheet("Courses",["ID","Name","Location","Par"].concat(h).concat(["SlopeRating","CourseRating","Tees"]));}
@@ -984,8 +998,10 @@ function CoursesPage({data,url,refresh,setData}){
     if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
     setSearchBusy(true);setSearchResults(null);
     try{
-      const action="searchCourses&name="+encodeURIComponent(name.trim())+"&location="+encodeURIComponent((location||"").trim());
-      const res=await jsonpGet(url,action);
+      const token="_sc"+Date.now();
+      await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action:"searchCourses",data:{name:name.trim(),location:(location||"").trim()},token})});
+      await new Promise(r=>setTimeout(r,1500));
+      const res=await jsonpGet(url,"getSearchResult&token="+encodeURIComponent(token));
       if(res.error){N("Search error: "+res.error,"error");}
       else{
         setSearchResults(res.courses||[]);
