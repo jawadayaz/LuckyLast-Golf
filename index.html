@@ -640,11 +640,19 @@ function searchCourses(d){
   var j=JSON.parse(res.getContentText());
   if(j.error)return{error:j.error};
   var courses=(j.courses||[]).slice(0,8).map(function(c){
-    var tees=(c.tees||[]).map(function(t){
-      return{name:t.tee_name||t.name,slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};
-    }).filter(function(t){return t.name&&t.slope;});
+    var tees=[];
+    if(Array.isArray(c.tees)){
+      tees=(c.tees).map(function(t){return{name:t.tee_name||t.name,slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};}).filter(function(t){return t.name&&t.slope;});
+    } else if(c.tees&&typeof c.tees==="object"){
+      tees=Object.keys(c.tees).map(function(k){var t=c.tees[k];return{name:k,slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};}).filter(function(t){return t.name&&t.slope;});
+    }
+    // Also check top-level tee_sets or course_tees arrays
+    var teeSrc=c.tee_sets||c.course_tees||c.teeSets||[];
+    if(!tees.length&&Array.isArray(teeSrc)){
+      tees=teeSrc.map(function(t){return{name:t.tee_name||t.name||t.label,slope:t.slope_rating||t.slope,rating:t.course_rating||t.rating};}).filter(function(t){return t.name&&t.slope;});
+    }
     var holes=[];
-    if(c.holes){for(var i=0;i<c.holes.length;i++){holes.push({par:parseInt(c.holes[i].par)||4,si:parseInt(c.holes[i].handicap||c.holes[i].stroke_index)||i+1});}}
+    if(c.holes){for(var i=0;i<c.holes.length;i++){holes.push({par:parseInt(c.holes[i].par)||4,si:parseInt(c.holes[i].handicap||c.holes[i].stroke_index||c.holes[i].si)||i+1});}}
     return{name:c.club_name||c.course_name||c.name,location:(c.city||"")+(c.state?", "+c.state:"")+(c.country?", "+c.country:""),tees:tees,holes:holes.length===18?holes:[]};
   });
   return{courses:courses};
