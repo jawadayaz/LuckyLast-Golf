@@ -1000,19 +1000,9 @@ function CoursesPage({data,url,refresh,setData}){
     if(!url){N("Not connected to Google Sheets — go to Setup tab first","warn");return;}
     setSearchBusy(true);setSearchResults(null);
     try{
-      const token="_sc"+Date.now();
-      await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action:"searchCourses",data:{name:name.trim(),location:(location||"").trim()},token})});
-      // Poll with retries — GAS search can take 2-4s
-      let res=null;
-      for(let i=0;i<6;i++){
-        await new Promise(r=>setTimeout(r,1200));
-        try{
-          const r=await jsonpGet(url,"getScorecardResult&token="+encodeURIComponent(token));
-          if(!r.error||!r.error.includes("not ready")){res=r;break;}
-        }catch(e){}
-      }
-      if(!res){N("Search timed out — GAS may be slow, try again","warn");}
-      else if(res.error){N("Search error: "+res.error,"error");}
+      const action="searchCourses&name="+encodeURIComponent(name.trim())+"&location="+encodeURIComponent((location||"").trim());
+      const res=await jsonpGet(url,action);
+      if(res.error){N("Search error: "+res.error,"error");}
       else{
         setSearchResults(res.courses||[]);
         if(!res.courses?.length)N("No courses found — try a different name","warn");
