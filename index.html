@@ -2139,7 +2139,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
     return canvas.toDataURL("image/png");
   };
 
-  const sendWhatsApp=()=>{
+    const sendWhatsApp=()=>{
     // Generate and download scorecard image
     try{
       const imgData=generateScorecardImage();
@@ -2630,20 +2630,31 @@ function calcStraightMatchplay(holeIdxs,teamA,teamB,scores,course){
 
 // ── Standalone Scorecard Page ─────────────────────────────────────────────────
 function ScorecardPage({data,url,refresh}){
-  const [cid,setCid]=useState(()=>data.courses[0]?.id||null);
-  const [sel,setSel]=useState([]);
-  const [scores,setScores]=useState({});
-  const [done,setDone]=useState(false);
+  
+  const savedState = useMemo(() => {
+    try { return JSON.parse(localStorage.getItem("llg_scorecard_state")) || {}; }
+    catch(e) { return {}; }
+  }, []);
+
+  const [cid,setCid]=useState(savedState.cid || (()=>data.courses[0]?.id||null));
+  const [sel,setSel]=useState(savedState.sel || []);
+  const [scores,setScores]=useState(savedState.scores || {});
+  const [done,setDone]=useState(savedState.done || false);
   const [busy,setBusy]=useState(false);
   const [msg,setMsg]=useState(null);
-  // Match format
-  const [matchFmt,setMatchFmt]=useState("none"); // none | autopress | matchplay
-  const [teamA,setTeamA]=useState([]); // player ids
-  const teamB = sel.map(p => p.id).filter(id => !teamA.includes(id));
-  const [teamsDone,setTeamsDone]=useState(false);
-  const [startHole,setStartHole]=useState(1);
-  // Ratha Ratha pairs
-  const [rrPairs,setRrPairs]=useState([]);
+  const [matchFmt,setMatchFmt]=useState(savedState.matchFmt || "none");
+  const [teamA,setTeamA]=useState(savedState.teamA || []);
+  const teamB = sel.map(p => String(p.id)).filter(id => !teamA.map(String).includes(id));
+  const [teamsDone,setTeamsDone]=useState(savedState.teamsDone || false);
+  const [startHole,setStartHole]=useState(savedState.startHole || 1);
+  const [rrPairs,setRrPairs]=useState(savedState.rrPairs || []);
+
+  useEffect(() => {
+    localStorage.setItem("llg_scorecard_state", JSON.stringify({
+      cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs
+    }));
+  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs]);
+  
   const [expandedPairs,setExpandedPairs]=useState(new Set());
 
   const course=data.courses.find(c=>String(c.id)===String(cid));
@@ -2726,6 +2737,13 @@ function ScorecardPage({data,url,refresh}){
   };
 
   // WhatsApp & email
+  const handleDiscard=()=>{
+    if(confirm("Are you sure you want to discard this scorecard?")){
+      setDone(false);setSel([]);setScores({});setMatchFmt("none");
+      setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);
+      localStorage.removeItem("llg_scorecard_state");
+    }
+  };
   const buildWaText=()=>{
     const lines=[];
     if(matchResults){
@@ -2833,13 +2851,7 @@ function ScorecardPage({data,url,refresh}){
             <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
           </div>
         </div>
-        {matchFmt === "autopress" && (<div className="fg fg2" style={{marginBottom:12}}>
-          <div className="ff"><label>Starting Hole</label>
-            <select value={startHole} onChange={e=>setStartHole(parseInt(e.target.value))}>
-              {Array.from({length:18},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
-            </select>
-          </div>
-        </div>)}
+        
 
         <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
         <div className="psel" style={{marginBottom:16}}>
@@ -2865,6 +2877,16 @@ function ScorecardPage({data,url,refresh}){
               </button>
             ))}
           </div>
+          {matchFmt === "autopress" && (
+            <div className="fg fg2" style={{marginBottom:10}}>
+              <div className="ff">
+                <label>Starting Hole</label>
+                <select value={startHole} onChange={e=>setStartHole(parseInt(e.target.value))}>
+                  {Array.from({length:18},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
           {matchFmt!=="none"&&sel.length>=2&&(
             <div>
               <div className="fg fg2" style={{marginBottom:10,alignItems:"flex-end"}}>
@@ -2893,9 +2915,13 @@ function ScorecardPage({data,url,refresh}){
                     </select>
                   </div>
                 </div>
-                {teamB.length > 0 && (
+                {teamA.length === 2 && teamA[0] && teamA[1] && teamA[0] !== teamA[1] ? (
                   <div style={{fontSize:12,color:"var(--blue)",fontWeight:600,padding:"6px 10px",background:"#e3f2fd",borderRadius:6}}>
                     Team B: {sel.filter(x=>teamB.includes(x.id)).map(p=>p.name).join(" & ")}
+                  </div>
+                ) : (
+                  <div style={{fontSize:12,color:"var(--gray-500)",fontWeight:600,padding:"6px 10px",background:"var(--gray-50)",borderRadius:6}}>
+                    Team B: ...
                   </div>
                 )}
             </div>
@@ -2988,18 +3014,19 @@ function ScorecardPage({data,url,refresh}){
           <div className="card-title">{course.name}</div>
           <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
           {!done?(
-            <div className="btn-row" style={{marginTop:12}}>
+            <div className="btn-row" style={{marginTop:12, flexWrap:"wrap"}}>
               <button className="btn btn-primary" onClick={submit} disabled={busy}
                 style={{opacity:canSubmit?1:0.5}}
                 title={canSubmit?"":"Need 14+ holes for 2+ players"}>
                 {busy?<><Spin/>Saving…</>:"Submit & Email"}
               </button>
               <button className="btn btn-wa" onClick={sendWhatsApp}>📲 WhatsApp</button>
+              <button className="btn btn-danger" style={{background:"var(--red)",color:"white"}} onClick={handleDiscard}>🗑️ Discard</button>
             </div>
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
