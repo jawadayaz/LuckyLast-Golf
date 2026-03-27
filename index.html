@@ -2663,7 +2663,7 @@ function ScorecardPage({data,url,refresh}){
   const toggle=p=>{
     if(sel.find(x=>x.id===p.id)){
       setSel(sel.filter(x=>x.id!==p.id));
-      setTeamA(teamA.filter(id=>id!==p.id));
+      setTeamA(teamA.filter(id=>String(id)!==String(p.id)));
       
     }
     else if(sel.length<4){setSel([...sel,p]);if(!scores[p.id])setScores(s=>({...s,[p.id]:Array(18).fill("")}));}
@@ -2684,8 +2684,8 @@ function ScorecardPage({data,url,refresh}){
     return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
   },[sel,scores,course]);
 
-  const tAPlayers=sel.filter(p=>teamA.includes(p.id));
-  const tBPlayers=sel.filter(p=>teamB.includes(p.id));
+  const tAPlayers=sel.filter(p=>teamA.map(String).includes(String(p.id)));
+  const tBPlayers=sel.filter(p=>teamB.includes(String(p.id)));
   const canMatch=tAPlayers.length>=1&&tBPlayers.length>=1;
 
   const matchResults=useMemo(()=>{
