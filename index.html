@@ -1509,12 +1509,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                 <option value="ryder">Ryder Cup (Matchplay)</option>
               </select>
             </div>
-            <div className="ff">
-              <label>Starting Hole <span style={{fontWeight:400,fontSize:11,color:"var(--gray-400)"}}>— shotgun start</span></label>
-              <select value={t.startHole||1} onChange={e=>set("startHole",parseInt(e.target.value))}>
-                {Array.from({length:18},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
-              </select>
-            </div>
+            
           </div>
           <div style={{marginTop:12,padding:10,background:"var(--gray-50)",borderRadius:8,fontSize:12,color:"var(--gray-600)",lineHeight:1.6}}>
             {(t.teamFormat||"modSF")==="modSF"&&<span><strong>Modified Stableford:</strong> Each player's Modified Stableford (75% HC) score summed for team total.</span>}
@@ -2644,7 +2639,7 @@ function ScorecardPage({data,url,refresh}){
   // Match format
   const [matchFmt,setMatchFmt]=useState("none"); // none | autopress | matchplay
   const [teamA,setTeamA]=useState([]); // player ids
-  const [teamB,setTeamB]=useState([]); // player ids
+  const teamB = sel.map(p => p.id).filter(id => !teamA.includes(id));
   const [teamsDone,setTeamsDone]=useState(false);
   const [startHole,setStartHole]=useState(1);
   // Ratha Ratha pairs
@@ -2658,46 +2653,15 @@ function ScorecardPage({data,url,refresh}){
     if(sel.find(x=>x.id===p.id)){
       setSel(sel.filter(x=>x.id!==p.id));
       setTeamA(teamA.filter(id=>id!==p.id));
-      setTeamB(teamB.filter(id=>id!==p.id));
+      
     }
     else if(sel.length<4){setSel([...sel,p]);if(!scores[p.id])setScores(s=>({...s,[p.id]:Array(18).fill("")}));}
     else N("Max 4 players per scorecard","warn");
   };
   const setScore=(pid,h,v)=>setScores(s=>({...s,[pid]:s[pid].map((x,i)=>i===h?v:x)}));
 
-  const resetTeams=()=>{setTeamA([]);setTeamB([]);setTeamsDone(false);};
-  const toggleTeam=(team,pid)=>{
-    if(team==="A"){
-      if(teamA.includes(pid)){setTeamA(teamA.filter(id=>id!==pid));}
-      else{
-        const newA=[...teamA,pid];
-        setTeamA(newA);
-        setTeamB(prev=>{
-          const filtered=prev.filter(id=>id!==pid);
-          // Auto-assign remaining 2 to Team B when 4 players and Team A is now full (2)
-          if(sel.length===4&&newA.length===2){
-            return sel.map(p=>p.id).filter(id=>!newA.includes(id));
-          }
-          return filtered;
-        });
-      }
-    } else {
-      if(teamB.includes(pid)){setTeamB(teamB.filter(id=>id!==pid));}
-      else{
-        const newB=[...teamB,pid];
-        setTeamB(newB);
-        setTeamA(prev=>{
-          const filtered=prev.filter(id=>id!==pid);
-          // Auto-assign remaining 2 to Team A when 4 players and Team B is now full (2)
-          if(sel.length===4&&newB.length===2){
-            return sel.map(p=>p.id).filter(id=>!newB.includes(id));
-          }
-          return filtered;
-        });
-      }
-    }
-  };
-
+  const resetTeams=()=>{setTeamA([]);setTeamsDone(false);};
+  
   const addRrPair=()=>setRrPairs(p=>[...p,{id:Date.now(),p1Id:null,p2Id:null,diff:null,higherPId:null}]);
   const removeRrPair=(id)=>setRrPairs(p=>p.filter(x=>x.id!==id));
   const setRrF=(id,k,v)=>setRrPairs(p=>p.map(x=>x.id===id?{...x,[k]:v}:x));
@@ -2869,13 +2833,13 @@ function ScorecardPage({data,url,refresh}){
             <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
           </div>
         </div>
-        <div className="fg fg2" style={{marginBottom:12}}>
-          <div className="ff"><label>Starting Hole <span style={{fontWeight:400,fontSize:11,color:"var(--gray-400)"}}>— shotgun start</span></label>
+        {matchFmt === "autopress" && (<div className="fg fg2" style={{marginBottom:12}}>
+          <div className="ff"><label>Starting Hole</label>
             <select value={startHole} onChange={e=>setStartHole(parseInt(e.target.value))}>
               {Array.from({length:18},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
             </select>
           </div>
-        </div>
+        </div>)}
 
         <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
         <div className="psel" style={{marginBottom:16}}>
@@ -2903,44 +2867,37 @@ function ScorecardPage({data,url,refresh}){
           </div>
           {matchFmt!=="none"&&sel.length>=2&&(
             <div>
-              {teamsDone?(
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:"#e8f5e9",borderRadius:8}}>
-                  <span style={{fontSize:12.5,color:"var(--green)",fontWeight:600}}>
-                    {tAPlayers.map(p=>p.name.split(" ")[0]).join(" & ")} vs {tBPlayers.map(p=>p.name.split(" ")[0]).join(" & ")}
-                  </span>
-                  <button className="btn btn-sm btn-ghost" onClick={()=>setTeamsDone(false)}>Edit</button>
-                </div>
-              ):(
-                <div>
-                  <div className="fg fg2" style={{marginBottom:10}}>
-                    <div>
-                      <div style={{fontSize:11,color:"var(--green)",fontWeight:700,marginBottom:5}}>Team A</div>
-                      {sel.map(p=>(
-                        <div key={p.id} className={"pchip"+(teamA.includes(p.id)?" on":"")}
-                          style={{marginBottom:4,background:teamA.includes(p.id)?"#e8f5e9":"white",borderColor:teamA.includes(p.id)?"var(--green)":"var(--gray-200)"}}
-                          onClick={()=>toggleTeam("A",p.id)}>
-                          <span style={{flex:1,fontSize:12}}>{p.name}</span>
-                          <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,color:"var(--blue)",fontWeight:700,marginBottom:5}}>Team B</div>
-                      {sel.map(p=>(
-                        <div key={p.id} className={"pchip"+(teamB.includes(p.id)?" on":"")}
-                          style={{marginBottom:4,background:teamB.includes(p.id)?"#e3f2fd":"white",borderColor:teamB.includes(p.id)?"var(--blue)":"var(--gray-200)"}}
-                          onClick={()=>toggleTeam("B",p.id)}>
-                          <span style={{flex:1,fontSize:12}}>{p.name}</span>
-                          <span style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</span>
-                        </div>
-                      ))}
-                    </div>
+              <div className="fg fg2" style={{marginBottom:10,alignItems:"flex-end"}}>
+                  <div className="ff">
+                    <label>Team A — Player 1</label>
+                    <select value={teamA[0] || ""} onChange={e=>{
+                        const p = e.target.value;
+                        const newA = p ? [p, teamA[1]].filter(Boolean) : [teamA[1]].filter(Boolean);
+                        setTeamA(newA);
+                        
+                      }}>
+                      <option value="">-- Select --</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
                   </div>
-                  {tAPlayers.length>=1&&tBPlayers.length>=1&&(
-                    <button className="btn btn-primary btn-sm" style={{width:"100%"}} onClick={()=>setTeamsDone(true)}>Done ✓</button>
-                  )}
+                  <div className="ff">
+                    <label>Team A — Player 2</label>
+                    <select value={teamA[1] || ""} onChange={e=>{
+                        const p = e.target.value;
+                        const newA = p ? [teamA[0], p].filter(Boolean) : [teamA[0]].filter(Boolean);
+                        setTeamA(newA);
+                        
+                      }}>
+                      <option value="">-- Select --</option>
+                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>
                 </div>
-              )}
+                {teamB.length > 0 && (
+                  <div style={{fontSize:12,color:"var(--blue)",fontWeight:600,padding:"6px 10px",background:"#e3f2fd",borderRadius:6}}>
+                    Team B: {sel.filter(x=>teamB.includes(x.id)).map(p=>p.name).join(" & ")}
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -3042,7 +2999,7 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setTeamB([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
