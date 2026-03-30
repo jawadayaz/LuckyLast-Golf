@@ -2661,13 +2661,16 @@ function ScorecardPage({data,url,refresh}){
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
 
   const toggle=p=>{
-    if(sel.find(x=>x.id===p.id)){
-      setSel(sel.filter(x=>x.id!==p.id));
-      setTeamA(teamA.filter(id=>String(id)!==String(p.id)));
-      
-    }
-    else if(sel.length<4){setSel([...sel,p]);if(!scores[p.id])setScores(s=>({...s,[p.id]:Array(18).fill("")}));}
-    else N("Max 4 players per scorecard","warn");
+    if(!sel.find(x=>x.id===p.id)&&sel.length>=4){N("Max 4 players per scorecard","warn");return;}
+    setSel(prev=>{
+      if(prev.find(x=>x.id===p.id)){
+        setTeamA(ta=>ta.filter(id=>String(id)!==String(p.id)));
+        return prev.filter(x=>x.id!==p.id);
+      }
+      if(prev.length>=4) return prev;
+      setScores(s=>({...s,[p.id]:s[p.id]||Array(18).fill("")}));
+      return [...prev,p];
+    });
   };
   const setScore=(pid,h,v)=>setScores(s=>({...s,[pid]:s[pid].map((x,i)=>i===h?v:x)}));
 
