@@ -514,7 +514,7 @@ function ScorecardGrid({course,players,scores,setScore,locked,showMsf}){
             return <tr key={p.id}>
               <td style={{textAlign:"left",paddingLeft:9}}>
                 <div style={{fontWeight:700,fontSize:12}}>{p.name}</div>
-                <div style={{fontSize:10,color:"var(--gray-400)"}}>HC {p.handicap}</div>
+                <div style={{fontSize:10,color:"var(--gray-400)"}}>PHC {p.handicap}</div>
               </td>
               {course.holes.slice(0,9).map((h,i)=>(
                 <td key={i}>
@@ -2650,18 +2650,38 @@ function ScorecardPage({data,url,refresh}){
   const [teamA,setTeamA]=useState(savedState.teamA || []);
   const teamB = sel.map(p => String(p.id)).filter(id => !teamA.map(String).includes(id));
   const [teamsDone,setTeamsDone]=useState(savedState.teamsDone || false);
+  const [teamSectionOpen,setTeamSectionOpen]=useState(true);
+  const [rrSectionOpen,setRrSectionOpen]=useState(true);
   const [startHole,setStartHole]=useState(savedState.startHole || 1);
   const [rrPairs,setRrPairs]=useState(savedState.rrPairs || []);
+  const [selTee,setSelTee]=useState(savedState.selTee || null);
 
   useEffect(() => {
     localStorage.setItem("llg_scorecard_state", JSON.stringify({
-      cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs
+      cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee
     }));
   }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs]);
   
   const [expandedPairs,setExpandedPairs]=useState(new Set());
 
   const course=data.courses.find(c=>String(c.id)===String(cid));
+
+  // Auto-select first tee when course changes and selTee is invalid
+  const courseTees=course?.tees?Object.keys(course.tees):[];
+  const effectiveTee=(selTee&&courseTees.includes(selTee))?selTee:(courseTees[0]||null);
+  const teeData=course&&effectiveTee&&course.tees[effectiveTee]?course.tees[effectiveTee]:null;
+
+  // Playing handicap = round(HI × (slope/113) + (rating - par))
+  const calcPlayingHcp=(hi)=>{
+    if(!teeData||!course)return Math.round(hi);
+    const slope=parseFloat(teeData.slope)||113;
+    const rating=parseFloat(teeData.rating)||course.par;
+    return Math.round(hi*(slope/113)+(rating-course.par));
+  };
+
+  // Players with playing handicap substituted for hole-allocation
+  const selWithPhcp=sel.map(p=>({...p,handicap:calcPlayingHcp(p.handicap)}));
+
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
 
   const toggle=p=>{
@@ -2685,14 +2705,15 @@ function ScorecardPage({data,url,refresh}){
   const setRrF=(id,k,v)=>setRrPairs(p=>p.map(x=>x.id===id?{...x,[k]:v}:x));
   const togglePair=(i)=>setExpandedPairs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
 
-  // Computed results
+  // Computed results — use playing handicaps for all score formats
   const selResults=useMemo(()=>{
-    if(!course||!sel.length)return[];
-    return calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
-  },[sel,scores,course]);
+    if(!course||!selWithPhcp.length)return[];
+    return calcFormats(selWithPhcp.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+  // eslint-disable-next-line
+  },[selWithPhcp.map(p=>p.id+":"+p.handicap).join(),scores,course]);
 
-  const tAPlayers=sel.filter(p=>teamA.map(String).includes(String(p.id)));
-  const tBPlayers=sel.filter(p=>teamB.includes(String(p.id)));
+  const tAPlayers=selWithPhcp.filter(p=>teamA.map(String).includes(String(p.id)));
+  const tBPlayers=selWithPhcp.filter(p=>teamB.includes(String(p.id)));
   const canMatch=tAPlayers.length>=1&&tBPlayers.length>=1;
 
   const matchResults=useMemo(()=>{
@@ -2747,7 +2768,8 @@ function ScorecardPage({data,url,refresh}){
   const handleDiscard=()=>{
     if(confirm("Are you sure you want to discard this scorecard?")){
       setDone(false);setSel([]);setScores({});setMatchFmt("none");
-      setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);
+      setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);
+      setTeamSectionOpen(true);setRrSectionOpen(true);
       localStorage.removeItem("llg_scorecard_state");
     }
   };
@@ -2893,13 +2915,18 @@ function ScorecardPage({data,url,refresh}){
     return canvas.toDataURL("image/png");
   };
 
+  const doSave=async()=>{
+    if(!canSubmit)return N("Need at least 14 holes scored for 2 or more players","warn");
+    await doSubmit("");
+  };
+
   const doSubmit=async(emailAddr)=>{
     setEmailDlg(false);
     if(!course||!sel.length)return N("Select a course and at least one player","error");
     setBusy(true);
     try{
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(sel.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(selWithPhcp.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -2952,7 +2979,7 @@ function ScorecardPage({data,url,refresh}){
         <div className="card-title">Setup</div>
         <div className="fg fg2" style={{marginBottom:8}}>
           <div className="ff"><label>Course</label>
-            <select value={cid||""} onChange={e=>{setCid(e.target.value);setDone(false);}}>
+            <select value={cid||""} onChange={e=>{setCid(e.target.value);setSelTee(null);setDone(false);}}>
               {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
@@ -2960,6 +2987,22 @@ function ScorecardPage({data,url,refresh}){
             <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
           </div>
         </div>
+        {courseTees.length>0&&(
+          <div className="fg fg2" style={{marginBottom:8}}>
+            <div className="ff"><label>Tee</label>
+              <select value={effectiveTee||""} onChange={e=>setSelTee(e.target.value)}>
+                {courseTees.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            {teeData&&(
+              <div className="ff" style={{display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
+                <div style={{fontSize:11,color:"var(--gray-500)",padding:"6px 0",lineHeight:1.6}}>
+                  Rating <strong>{teeData.rating}</strong> &nbsp;·&nbsp; Slope <strong>{teeData.slope}</strong>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         
 
         <div className="section-title" style={{marginBottom:6}}>Players (max 4)</div>
@@ -2998,41 +3041,56 @@ function ScorecardPage({data,url,refresh}){
           )}
           {matchFmt!=="none"&&sel.length>=2&&(
             <div>
-              <div className="fg fg2" style={{marginBottom:10,alignItems:"flex-end"}}>
-                  <div className="ff">
-                    <label>Team A — Player 1</label>
-                    <select value={teamA[0] || ""} onChange={e=>{
-                        const p = e.target.value;
-                        const newA = p ? [p, teamA[1]].filter(Boolean) : [teamA[1]].filter(Boolean);
-                        setTeamA(newA);
-                        
-                      }}>
-                      <option value="">-- Select --</option>
-                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
+              {/* Collapsed summary when teams are set */}
+              {!teamSectionOpen&&teamA.length===2&&teamA[0]&&teamA[1]&&teamA[0]!==teamA[1]?(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 10px",background:"#e3f2fd",borderRadius:7,cursor:"pointer"}} onClick={()=>setTeamSectionOpen(true)}>
+                  <div style={{fontSize:12,fontWeight:600,color:"var(--blue)"}}>
+                    A: {sel.filter(p=>teamA.map(String).includes(String(p.id))).map(p=>p.name.split(" ")[0]).join(" & ")}
+                    &nbsp;vs&nbsp;
+                    B: {sel.filter(p=>teamB.includes(String(p.id))).map(p=>p.name.split(" ")[0]).join(" & ")}
                   </div>
-                  <div className="ff">
-                    <label>Team A — Player 2</label>
-                    <select value={teamA[1] || ""} onChange={e=>{
-                        const p = e.target.value;
-                        const newA = p ? [teamA[0], p].filter(Boolean) : [teamA[0]].filter(Boolean);
-                        setTeamA(newA);
-                        
-                      }}>
-                      <option value="">-- Select --</option>
-                      {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
+                  <span style={{fontSize:11,color:"var(--blue)",fontWeight:600}}>Edit ▶</span>
                 </div>
-                {teamA.length === 2 && teamA[0] && teamA[1] && teamA[0] !== teamA[1] ? (
-                  <div style={{fontSize:12,color:"var(--blue)",fontWeight:600,padding:"6px 10px",background:"#e3f2fd",borderRadius:6}}>
-                    Team B: {sel.filter(x=>teamB.includes(String(x.id))).map(p=>p.name).join(" & ")}
+              ):(
+                <div>
+                  <div className="fg fg2" style={{marginBottom:10,alignItems:"flex-end"}}>
+                    <div className="ff">
+                      <label>Team A — Player 1</label>
+                      <select value={teamA[0] || ""} onChange={e=>{
+                          const p = e.target.value;
+                          const newA = p ? [p, teamA[1]].filter(Boolean) : [teamA[1]].filter(Boolean);
+                          setTeamA(newA);
+                        }}>
+                        <option value="">-- Select --</option>
+                        {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="ff">
+                      <label>Team A — Player 2</label>
+                      <select value={teamA[1] || ""} onChange={e=>{
+                          const p = e.target.value;
+                          const newA = p ? [teamA[0], p].filter(Boolean) : [teamA[0]].filter(Boolean);
+                          setTeamA(newA);
+                        }}>
+                        <option value="">-- Select --</option>
+                        {sel.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
                   </div>
-                ) : (
-                  <div style={{fontSize:12,color:"var(--gray-500)",fontWeight:600,padding:"6px 10px",background:"var(--gray-50)",borderRadius:6}}>
-                    Team B: ...
-                  </div>
-                )}
+                  {teamA.length === 2 && teamA[0] && teamA[1] && teamA[0] !== teamA[1] ? (
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+                      <div style={{fontSize:12,color:"var(--blue)",fontWeight:600,padding:"6px 10px",background:"#e3f2fd",borderRadius:6,flex:1,marginRight:8}}>
+                        Team B: {sel.filter(x=>teamB.includes(String(x.id))).map(p=>p.name).join(" & ")}
+                      </div>
+                      <button className="btn btn-sm btn-primary" onClick={()=>setTeamSectionOpen(false)}>Done ▼</button>
+                    </div>
+                  ) : (
+                    <div style={{fontSize:12,color:"var(--gray-500)",fontWeight:600,padding:"6px 10px",background:"var(--gray-50)",borderRadius:6}}>
+                      Team B: ...
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3040,10 +3098,37 @@ function ScorecardPage({data,url,refresh}){
         {/* Ratha Ratha */}
         <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginTop:12}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div className="section-title">Ratha Ratha pairs (optional)</div>
-            <button className="btn btn-sm btn-primary" onClick={addRrPair}>+ Add pair</button>
+            <div className="section-title" style={{cursor:rrPairs.length?"pointer":"default"}} onClick={()=>rrPairs.length&&setRrSectionOpen(o=>!o)}>
+              Ratha Ratha pairs (optional){rrPairs.length>0&&<span style={{fontSize:11,marginLeft:6,color:"var(--gray-400)"}}>{rrSectionOpen?"▼":"▶"}</span>}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              {rrPairs.length>0&&(
+                <button className="btn btn-sm btn-ghost" onClick={()=>setRrSectionOpen(o=>!o)} style={{fontSize:11}}>
+                  {rrSectionOpen?"Collapse":"Expand"}
+                </button>
+              )}
+              <button className="btn btn-sm btn-primary" onClick={()=>{addRrPair();setRrSectionOpen(true);}}>+ Add pair</button>
+            </div>
           </div>
-          {rrPairs.map((rp,pi)=>{
+
+          {/* Collapsed summary */}
+          {!rrSectionOpen&&rrPairs.length>0&&(
+            <div style={{padding:"6px 10px",background:"#e8f5e9",borderRadius:7,fontSize:12,color:"var(--green)",fontWeight:600}}>
+              {rrPairs.map((rp,pi)=>{
+                const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
+                const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
+                return(
+                  <div key={rp.id}>
+                    Pair {pi+1}: {p1?p1.name.split(" ")[0]:"?"} vs {p2?p2.name.split(" ")[0]:"?"}
+                    {rp.diff!=null&&` (+${rp.diff} strokes)`}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Expanded pairs editor */}
+          {rrSectionOpen&&rrPairs.map((rp,pi)=>{
             const p1=data.players.find(p=>String(p.id)===String(rp.p1Id));
             const p2=data.players.find(p=>String(p.id)===String(rp.p2Id));
             const curDiff=rp.diff!=null?rp.diff:null;
@@ -3094,7 +3179,7 @@ function ScorecardPage({data,url,refresh}){
               </div>
             );
           })}
-          {!rrPairs.length&&<p style={{fontSize:12,color:"var(--gray-400)"}}>No pairs yet.</p>}
+          {rrSectionOpen&&!rrPairs.length&&<p style={{fontSize:12,color:"var(--gray-400)"}}>No pairs yet.</p>}
         </div>
       </div>
 
@@ -3121,7 +3206,7 @@ function ScorecardPage({data,url,refresh}){
       {sel.length>0&&course&&(
         <div className="card">
           <div className="card-title">{course.name}</div>
-          <ScorecardGrid course={course} players={sel} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
+          <ScorecardGrid course={course} players={selWithPhcp} scores={scores} setScore={done?null:setScore} locked={done} showMsf={true}/>
           {!done?(
             <div className="btn-row" style={{marginTop:12, flexWrap:"wrap"}}>
               <button className="btn btn-primary" onClick={submit} disabled={busy}
@@ -3129,13 +3214,19 @@ function ScorecardPage({data,url,refresh}){
                 title={canSubmit?"":"Need 14+ holes for 2+ players"}>
                 {busy?<><Spin/>Saving…</>:"Submit & Email"}
               </button>
+              <button className="btn btn-ghost" onClick={doSave} disabled={busy}
+                data-testid="save-btn"
+                style={{opacity:canSubmit?1:0.5,border:"1.5px solid var(--green)",color:"var(--green)"}}
+                title={canSubmit?"":"Need 14+ holes for 2+ players"}>
+                {busy?<><Spin/>Saving…</>:"Save"}
+              </button>
               <button className="btn btn-wa" onClick={sendWhatsApp}>📲 WhatsApp</button>
               <button className="btn btn-danger" style={{background:"var(--red)",color:"white"}} onClick={handleDiscard}>🗑️ Discard</button>
             </div>
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setTeamSectionOpen(true);setRrSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
