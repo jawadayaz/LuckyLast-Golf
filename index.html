@@ -1171,11 +1171,24 @@ function CoursesPage({data,url,refresh,setData}){
                 <label style={{fontSize:11,color:"var(--gray-500)",display:"block",marginBottom:3}}>Slope</label>
                 <input value={newTee.slope} onChange={e=>setNewTee({...newTee,slope:e.target.value})} placeholder="125" type="number"/>
               </div>
-              <button className="btn btn-primary btn-sm" style={{marginBottom:1}} onClick={()=>{
+              <button className="btn btn-primary btn-sm" style={{marginBottom:1}} onClick={async()=>{
                 if(!newTee.name.trim())return N("Tee name required","error");
                 if(form.tees[newTee.name.trim()])return N("Tee name already exists","error");
-                setForm({...form,tees:{...form.tees,[newTee.name.trim()]:{rating:newTee.rating,slope:newTee.slope}}});
+                const updTees={...form.tees,[newTee.name.trim()]:{rating:newTee.rating,slope:newTee.slope}};
+                const updForm={...form,tees:updTees};
+                setForm(updForm);
                 setNewTee({name:"",rating:"",slope:""});
+                if(editId){
+                  setBusy(true);
+                  try{
+                    const par=updForm.holes.reduce((a,h)=>a+h.par,0);
+                    const upd={...updForm,id:editId,par};
+                    if(url){await apiPost(url,"updateCourse",upd);await refresh();}
+                    else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
+                    N("Tee added and saved ✓");
+                  }catch(e){N("Error saving tee: "+e.message,"error");}
+                  setBusy(false);
+                }
               }}>+ Add Tee</button>
             </div>
           </div>
@@ -1286,7 +1299,7 @@ function TournamentPage({data,url,refresh}){
 
   const newT=()=>{
     const id=Date.now();
-    const t={id,name:"",courseId:data.courses[0]?.id||null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],startHole:1,status:"setup"};
+    const t={id,name:"",courseId:data.courses[0]?.id||null,teeId:null,teams:[],groups:[],pairs:[],scores:{},lockedCards:[],teamFormat:"modSF",ryderMatches:[],startHole:1,status:"setup"};
     saveTourns([...tourns,t]);
     setTid(id);setView("setup");
   };
@@ -1466,7 +1479,17 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
                 <option value="ryder">Ryder Cup (Matchplay)</option>
               </select>
             </div>
-            
+            {course&&Object.keys(course.tees||{}).length>0&&(
+              <div className="ff">
+                <label>Tee (for Playing HC)</label>
+                <select value={t.teeId||""} onChange={e=>set("teeId",e.target.value||null)}>
+                  <option value="">No tee — use raw HC</option>
+                  {Object.entries(course.tees).map(([name,td])=>(
+                    <option key={name} value={name}>{name} (Rating: {td.rating}, Slope: {td.slope})</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div style={{marginTop:12,padding:10,background:"var(--gray-50)",borderRadius:8,fontSize:12,color:"var(--gray-600)",lineHeight:1.6}}>
             {(t.teamFormat||"modSF")==="modSF"&&<span><strong>Modified Stableford:</strong> Each player's Modified Stableford (75% HC) score summed for team total.</span>}
@@ -1689,6 +1712,16 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
   const [msg,setMsg]=useState(null);
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
 
+  // PHC calculation using tournament tee
+  const teeData=t.teeId&&course?.tees?.[t.teeId]?course.tees[t.teeId]:null;
+  const calcPhc=(hi)=>{
+    if(!teeData)return Math.round(hi);
+    const slope=parseFloat(teeData.slope)||113;
+    const rating=parseFloat(teeData.rating)||course.par;
+    return Math.round(hi*(slope/113)+(rating-course.par));
+  };
+  const withPhc=(players)=>players.map(p=>({...p,handicap:calcPhc(p.handicap)}));
+
   const gPlayers=(g)=>data.players.filter(p=>g.playerIds?.includes(p.id));
   const isLocked=(gid)=>(t.lockedCards||[]).includes(gid);
   const isScoringActive=(gid)=>(t.scoringCards||[]).includes(gid);
@@ -1709,7 +1742,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         setSaving(false);return;
       }
       const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+      const results=calcFormats(withPhc(players).map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
       if(url){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:t.name,scores:t.scores?.[r.playerId]||Array(18).fill(0)})));
         await refresh();
@@ -1797,10 +1830,11 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         {players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0))&&(
           <div className="card">
             <div className="card-title">{complete?"Final Scores":"Live Scores"} {active&&!complete&&<span className="live-dot"/>}</div>
+            {teeData&&<div style={{fontSize:11,color:"var(--gray-500)",marginBottom:6}}>Tee: <strong>{t.teeId}</strong> · Rating {teeData.rating} · Slope {teeData.slope} · PHC applied</div>}
             <table className="dt">
-              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <thead><tr><th>Player</th><th>PHC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(withPhc(players).map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1843,10 +1877,11 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
         {players.some(p=>(t.scores?.[p.id]||[]).some(v=>parseInt(v)>0))&&(
           <div className="card">
             <div className="card-title">Live Scores <span className="live-dot"/></div>
+            {teeData&&<div style={{fontSize:11,color:"var(--gray-500)",marginBottom:6}}>Tee: <strong>{t.teeId}</strong> · Rating {teeData.rating} · Slope {teeData.slope} · PHC applied</div>}
             <table className="dt">
-              <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+              <thead><tr><th>Player</th><th>PHC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
               <tbody>
-                {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
+                {calcFormats(withPhc(players).map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).map(r=>(
                   <tr key={r.playerId}>
                     <td style={{fontWeight:600}}>{r.playerName}</td><td>{r.handicap}</td>
                     <td>{r.gross||"—"}</td>
@@ -1966,10 +2001,20 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
   const allPlayers=data.players.filter(p=>allGroupPlayerIds.has(p.id));
   const isLive=t.status!=="complete";
 
+  // PHC for results
+  const resTeeData=t.teeId&&course?.tees?.[t.teeId]?course.tees[t.teeId]:null;
+  const calcResPhc=(hi)=>{
+    if(!resTeeData)return Math.round(hi);
+    const slope=parseFloat(resTeeData.slope)||113;
+    const rating=parseFloat(resTeeData.rating)||course.par;
+    return Math.round(hi*(slope/113)+(rating-course.par));
+  };
+
   const indivResults=useMemo(()=>{
     if(!course||!allPlayers.length)return[];
-    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
-  },[allPlayers,t.scores,course]);
+    return calcFormats(allPlayers.map(p=>({playerId:p.id,playerName:p.name,handicap:calcResPhc(p.handicap),scores:t.scores?.[p.id]||Array(18).fill(0)})),course);
+  // eslint-disable-next-line
+  },[allPlayers,t.scores,course,t.teeId]);
 
   const pairResults=useMemo(()=>{
     if(!course||!t.pairs?.length)return[];
@@ -2202,6 +2247,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
 
       {tab==="individual"&&(
         <div>
+          {resTeeData&&<div className="alert alert-info" style={{marginBottom:8,fontSize:12}}>Playing HC based on: <strong>{t.teeId}</strong> tee · Rating {resTeeData.rating} · Slope {resTeeData.slope}</div>}
           {[
             {key:"stableford",   label:"Stableford",            hi:true,  note:"Higher points wins"},
             {key:"modStableford",label:"Mod Stableford (75%)",  hi:true,  note:"Higher points wins"},
@@ -2217,7 +2263,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                     <div className={"lbpos"+(r.pos===1?" p1":r.pos===2?" p2":r.pos===3?" p3":" pn")}>{r.pos}</div>
                     <div style={{flex:1}}>
                       <div style={{fontWeight:600,fontSize:13.5}}>{r.playerName}</div>
-                      <div style={{fontSize:11,color:"var(--gray-400)"}}>HC {r.handicap} · Gross {r.gross||"—"}</div>
+                      <div style={{fontSize:11,color:"var(--gray-400)"}}>{resTeeData?"PHC":"HC"} {r.handicap} · Gross {r.gross||"—"}</div>
                     </div>
                     <div style={{fontFamily:"Playfair Display,serif",fontSize:22,fontWeight:700,color:"var(--green)"}}>{r[fmt.key]}</div>
                     {r.pos===1&&<span style={{fontSize:18}}>🏆</span>}
