@@ -1174,22 +1174,28 @@ function CoursesPage({data,url,refresh,setData}){
               <button className="btn btn-primary btn-sm" style={{marginBottom:1}} onClick={async()=>{
                 if(!newTee.name.trim())return N("Tee name required","error");
                 if(form.tees[newTee.name.trim()])return N("Tee name already exists","error");
+                if(!form.name.trim())return N("Course name required before adding a tee","error");
                 const updTees={...form.tees,[newTee.name.trim()]:{rating:newTee.rating,slope:newTee.slope}};
                 const updForm={...form,tees:updTees};
                 setForm(updForm);
                 setNewTee({name:"",rating:"",slope:""});
-                if(editId){
-                  setBusy(true);
-                  try{
-                    const par=updForm.holes.reduce((a,h)=>a+h.par,0);
+                setBusy(true);
+                try{
+                  const par=updForm.holes.reduce((a,h)=>a+h.par,0);
+                  if(editId){
                     const upd={...updForm,id:editId,par};
                     if(url){await apiPost(url,"updateCourse",upd);await refresh();}
                     else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
-                    N("Tee added and saved ✓");
-                  }catch(e){N("Error saving tee: "+e.message,"error");}
-                  setBusy(false);
-                }
-              }}>+ Add Tee</button>
+                  } else {
+                    const nc={id:Date.now(),...updForm,par};
+                    if(url){await apiPost(url,"addCourse",nc);await refresh();}
+                    else setData(d=>({...d,courses:[...d.courses,nc]}));
+                    setEditId(nc.id);
+                  }
+                  N("Tee added and saved ✓");
+                }catch(e){N("Error saving tee: "+e.message,"error");}
+                setBusy(false);
+              }}>+ Add & Save Tee</button>
             </div>
           </div>
 
@@ -2659,7 +2665,7 @@ function ScorecardPage({data,url,refresh}){
     localStorage.setItem("llg_scorecard_state", JSON.stringify({
       cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee
     }));
-  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs]);
+  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee]);
   
   const [expandedPairs,setExpandedPairs]=useState(new Set());
 
