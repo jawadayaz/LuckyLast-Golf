@@ -1236,6 +1236,18 @@ function CoursesPage({data,url,refresh,setData}){
             <div>
               <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--green)"}}>{c.name}</div>
               <div style={{fontSize:12,color:"var(--gray-400)",marginTop:2}}>{c.location}{c.location?" · ":""}Par {c.par}</div>
+              {c.tees&&Object.keys(c.tees).length>0&&(
+                <div style={{display:"flex",flexWrap:"wrap",gap:"6px 12px",marginTop:5}}>
+                  {Object.entries(c.tees).map(([tname,td])=>(
+                    <span key={tname} style={{fontSize:11,background:"var(--gray-100)",borderRadius:5,padding:"2px 8px",color:"var(--gray-600)",border:"1px solid var(--gray-200)"}}>
+                      <span style={{fontWeight:600,color:"var(--green-dark,var(--green))"}}>{tname}</span>
+                      {td.rating&&<span> · {td.rating}</span>}
+                      {td.slope&&<span style={{color:"var(--gray-500)"}}>/</span>}
+                      {td.slope&&<span>{td.slope}</span>}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{display:"flex",gap:6}}>
               <button className="btn btn-sm btn-ghost" onClick={()=>startEdit(c)}>✏️ Edit</button>
