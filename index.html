@@ -1178,18 +1178,26 @@ function CoursesPage({data,url,refresh,setData}){
                 const updForm={...form,tees:updTees};
                 setForm(updForm);
                 setNewTee({name:"",rating:"",slope:""});
-                if(editId){
-                  setBusy(true);
-                  try{
+                setBusy(true);
+                try{
+                  let eid=editId;
+                  if(!eid){
+                    if(!updForm.name.trim()){setBusy(false);return N("Course name required before adding a tee","error");}
                     const par=updForm.holes.reduce((a,h)=>a+h.par,0);
-                    const upd={...updForm,id:editId,par};
-                    if(url){await apiPost(url,"updateCourse",upd);await refresh();}
-                    else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(editId)?upd:c)}));
-                    N("Tee added and saved ✓");
-                  }catch(e){N("Error saving tee: "+e.message,"error");}
-                  setBusy(false);
-                }
-              }}>+ Add Tee</button>
+                    const nc={id:Date.now(),...updForm,par};
+                    if(url){await apiPost(url,"addCourse",nc);await refresh();}
+                    else setData(d=>({...d,courses:[...d.courses,nc]}));
+                    eid=nc.id;
+                    setEditId(nc.id);
+                  }
+                  const par=updForm.holes.reduce((a,h)=>a+h.par,0);
+                  const upd={...updForm,id:eid,par};
+                  if(url){await apiPost(url,"updateCourse",upd);await refresh();}
+                  else setData(d=>({...d,courses:d.courses.map(c=>String(c.id)===String(eid)?upd:c)}));
+                  N("Tee added and saved ✓");
+                }catch(e){N("Error saving tee: "+e.message,"error");}
+                setBusy(false);
+              }}>+ Add & Save Tee</button>
             </div>
           </div>
 
@@ -2659,7 +2667,7 @@ function ScorecardPage({data,url,refresh}){
     localStorage.setItem("llg_scorecard_state", JSON.stringify({
       cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee
     }));
-  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs]);
+  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee]);
   
   const [expandedPairs,setExpandedPairs]=useState(new Set());
 
