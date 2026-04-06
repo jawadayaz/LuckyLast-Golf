@@ -1261,6 +1261,15 @@ function CoursesPage({data,url,refresh,setData}){
               </tbody>
             </table>
           </div>
+          {c.tees&&Object.keys(c.tees).length>0&&(
+            <div style={{marginTop:10,display:"flex",flexWrap:"wrap",gap:6}}>
+              {Object.entries(c.tees).map(([name,td])=>(
+                <span key={name} style={{fontSize:12,background:"var(--green-dim,#e8f5e9)",border:"1px solid var(--green)",borderRadius:6,padding:"3px 8px",color:"var(--green)"}}>
+                  {name} · Rating: {td.rating} · Slope: {td.slope}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ))}
       {dlg&&<ConfirmDialog msg={dlg.msg} detail={dlg.detail} onOk={dlg.ok} onCancel={()=>setDlg(null)}/>}
