@@ -2339,7 +2339,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
                       <ScorecardGrid course={course} players={players} scores={t.scores||{}} setScore={null} locked={true}/>
                       <div style={{marginTop:12,overflowX:"auto"}}>
                         <table className="dt" style={{fontSize:12.5}}>
-                          <thead><tr><th>Player</th><th>HC</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
+                          <thead><tr><th>Player</th><th>HI</th><th>Gross</th><th>Stableford</th><th>Mod SF 75%</th><th>Net</th></tr></thead>
                           <tbody>
                             {calcFormats(players.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:t.scores?.[p.id]||Array(18).fill(0)})),course).filter(r=>r.gross>0).map(r=>(
                               <tr key={r.playerId}>
