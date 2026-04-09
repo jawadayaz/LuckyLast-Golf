@@ -2807,7 +2807,7 @@ function ScorecardPage({data,url,refresh}){
   const isSingles=matchFmt==="singles-autopress"||matchFmt==="singles-matchplay";
   const tAPlayers=isSingles
     ?selWithPhcp.filter(p=>String(p.id)===String(singlesA))
-    :selWithPhcp.filter(p=>String(p.id)===String(teamA[0]));
+    :selWithPhcp.filter(p=>teamA.map(String).includes(String(p.id)));
   const tBPlayers=isSingles
     ?selWithPhcp.filter(p=>String(p.id)===String(singlesB))
     :selWithPhcp.filter(p=>teamB.includes(String(p.id)));
@@ -2829,6 +2829,27 @@ function ScorecardPage({data,url,refresh}){
     return{f9,b9,f18,f9Label,b9Label};
   // eslint-disable-next-line
   },[matchFmt,canMatch,startHole,tAPlayers.map(p=>p.id).join(),tBPlayers.map(p=>p.id).join(),JSON.stringify(scores),course]);
+
+  const singlesResults=useMemo(()=>{
+    if(!course||matchFmt!=="autopress"||tAPlayers.length<2||tBPlayers.length<2)return null;
+    const si=(startHole-1)%18;
+    const allIdxs=Array.from({length:18},(_,i)=>(si+i)%18);
+    const f9Idxs=allIdxs.slice(0,9);
+    const b9Idxs=allIdxs.slice(9);
+    const f9Label=startHole===1?"Front 9":`Holes ${startHole}–${startHole+8>18?startHole+8-18:startHole+8} (F9)`;
+    const b9Label=startHole===1?"Back 9":`Holes ${startHole+9>18?startHole+9-18:startHole+9}–${startHole+17>18?startHole+17-18:startHole+17} (B9)`;
+    return[
+      {pA:tAPlayers[0],pB:tBPlayers[0],
+       f9:calcAutopress(f9Idxs,[tAPlayers[0]],[tBPlayers[0]],scores,course),
+       b9:calcAutopress(b9Idxs,[tAPlayers[0]],[tBPlayers[0]],scores,course),
+       f18:calcAutopress(allIdxs,[tAPlayers[0]],[tBPlayers[0]],scores,course),f9Label,b9Label},
+      {pA:tAPlayers[1],pB:tBPlayers[1],
+       f9:calcAutopress(f9Idxs,[tAPlayers[1]],[tBPlayers[1]],scores,course),
+       b9:calcAutopress(b9Idxs,[tAPlayers[1]],[tBPlayers[1]],scores,course),
+       f18:calcAutopress(allIdxs,[tAPlayers[1]],[tBPlayers[1]],scores,course),f9Label,b9Label}
+    ];
+  // eslint-disable-next-line
+  },[matchFmt,startHole,tAPlayers.map(p=>p.id).join(),tBPlayers.map(p=>p.id).join(),JSON.stringify(scores),course]);
 
   const rrResults=useMemo(()=>{
     if(!course||!rrPairs.length)return[];
@@ -2887,6 +2908,24 @@ function ScorecardPage({data,url,refresh}){
       fmtLine(matchResults.b9,matchResults.b9Label||"Back 9",true);
       fmtLine(matchResults.f18,"Full 18",false);
       lines.push("");
+    }
+    if(singlesResults){
+      singlesResults.forEach(sr=>{
+        const pAName=sr.pA.name.split(" ")[0];
+        const pBName=sr.pB.name.split(" ")[0];
+        lines.push(`*🎯 Singles — ${pAName} vs ${pBName}:*`);
+        const fmtSRLine=(r,label,isHalf)=>{
+          const winner=r.net>0?pAName:r.net<0?pBName:null;
+          const n=Math.abs(r.net);
+          const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+          const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+          lines.push(`  ${label.padEnd(8)} — ${txt}  (${r.state})`);
+        };
+        fmtSRLine(sr.f9,sr.f9Label||"Front 9",true);
+        fmtSRLine(sr.b9,sr.b9Label||"Back 9",true);
+        fmtSRLine(sr.f18,"Full 18",false);
+        lines.push("");
+      });
     }
     if(rrResults.length){
       lines.push("*⚔️ Ratha Ratha:*");
@@ -3391,7 +3430,7 @@ function ScorecardPage({data,url,refresh}){
           {matchResults&&canMatch&&(
             <div className="card">
               <div className="card-title">
-                {matchFmt==="autopress"?"🎯 Autopress":matchFmt==="singles-autopress"?"🎯 Singles Autopress":matchFmt==="singles-matchplay"?"⚔️ Singles Matchplay":"⚔️ Straight matchplay"}
+                {matchFmt==="autopress"?(singlesResults?"🎯 Doubles":"🎯 Autopress"):matchFmt==="singles-autopress"?"🎯 Singles Autopress":matchFmt==="singles-matchplay"?"⚔️ Singles Matchplay":"⚔️ Straight matchplay"}
                 <span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>{tAName} vs {tBName}</span>
               </div>
               {[
@@ -3466,6 +3505,39 @@ function ScorecardPage({data,url,refresh}){
               })}
             </div>
           )}
+
+          {/* Singles results (within autopress doubles) */}
+          {singlesResults&&singlesResults.map((sr,i)=>{
+            const pAName=sr.pA.name.split(" ")[0];
+            const pBName=sr.pB.name.split(" ")[0];
+            const fmtSR=(r,label,isHalf,isLast)=>{
+              const winner=r.net>0?pAName:r.net<0?pBName:null;
+              const n=Math.abs(r.net);
+              const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+              const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+              const col=r.net>0?"var(--green)":r.net<0?"var(--blue)":"var(--gray-600)";
+              return(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:isLast?"none":"1px solid var(--gray-100)"}}>
+                  <span style={{fontSize:13,fontWeight:600,color:"var(--gray-600)"}}>{label}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:13,fontWeight:700,color:col}}>{txt}</span>
+                    <span style={{fontFamily:"monospace",fontSize:12,padding:"2px 8px",background:"var(--gray-50)",borderRadius:6,color:"var(--gray-500)"}}>{r.state}</span>
+                  </div>
+                </div>
+              );
+            };
+            return(
+              <div key={i} className="card">
+                <div className="card-title">
+                  🎯 Singles
+                  <span style={{fontSize:11,fontWeight:400,color:"var(--gray-400)",marginLeft:8}}>{pAName} vs {pBName}</span>
+                </div>
+                {fmtSR(sr.f9,sr.f9Label||"Front 9",true,false)}
+                {fmtSR(sr.b9,sr.b9Label||"Back 9",true,false)}
+                {fmtSR(sr.f18,"Full 18",false,true)}
+              </div>
+            );
+          })}
 
           {/* Ratha Ratha results */}
           {rrResults.map((r,i)=>{
