@@ -2035,8 +2035,8 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
                     <span className="badge b-red" style={{animation:"pulse 1.5s ease-in-out infinite"}}>⏳ In Progress</span>
                     <button className="btn btn-sm btn-ghost" onClick={()=>setViewGid(g.id)}>👁 View Only</button>
                     <button className="btn btn-sm btn-gold" onClick={()=>{
-                      // Clear ALL scoringCards (kick any active sessions), then claim this one
-                      updateT(t.id,x=>({...x,scoringCards:[g.id]}));
+                      // Claim this group's slot while preserving other groups' active sessions
+                      updateT(t.id,x=>({...x,scoringCards:[...(x.scoringCards||[]).filter(id=>id!==g.id),g.id]}));
                       setActiveGid(g.id);
                       N("Session taken over — continuing from last saved scores");
                     }}>🎯 Take Over / Resume</button>
