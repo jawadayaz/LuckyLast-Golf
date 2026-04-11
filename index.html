@@ -2730,7 +2730,6 @@ function ScorecardPage({data,url,refresh}){
   const [teamsDone,setTeamsDone]=useState(savedState.teamsDone || false);
   const [teamSectionOpen,setTeamSectionOpen]=useState(true);
   const [rrSectionOpen,setRrSectionOpen]=useState(true);
-  const [singlesSectionOpen,setSinglesSectionOpen]=useState(true);
   const [playersSectionOpen,setPlayersSectionOpen]=useState(true);
   const [startHole,setStartHole]=useState(savedState.startHole || 1);
   const [rrPairs,setRrPairs]=useState(savedState.rrPairs || []);
@@ -3275,27 +3274,8 @@ function ScorecardPage({data,url,refresh}){
         {/* Singles pairings (autopress only) — fully independent from doubles setup */}
         {matchFmt==="autopress"&&sel.length>=2&&(
           <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginTop:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div className="section-title" style={{cursor:"pointer"}} onClick={()=>setSinglesSectionOpen(o=>!o)}>
-                Singles within autopress (optional){singlesMatches.some(sm=>sm.enabled)&&<span style={{fontSize:11,marginLeft:6,color:"var(--gray-400)"}}>{singlesSectionOpen?"▼":"▶"}</span>}
-              </div>
-              {singlesMatches.some(sm=>sm.enabled)&&singlesSectionOpen&&(
-                <button className="btn btn-sm btn-primary" onClick={()=>setSinglesSectionOpen(false)}>Done ▼</button>
-              )}
-            </div>
-            {!singlesSectionOpen&&singlesMatches.some(sm=>sm.enabled)&&(
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 10px",background:"#e8f5e9",borderRadius:7,cursor:"pointer"}} onClick={()=>setSinglesSectionOpen(true)}>
-                <div style={{fontSize:12,fontWeight:600,color:"var(--green)"}}>
-                  {singlesMatches.filter(sm=>sm.enabled&&sm.pAId&&sm.pBId).map(sm=>{
-                    const pA=(selWithPhcp.find(p=>String(p.id)===String(sm.pAId))||{name:"?"}).name.split(" ")[0];
-                    const pB=(selWithPhcp.find(p=>String(p.id)===String(sm.pBId))||{name:"?"}).name.split(" ")[0];
-                    return `${pA} vs ${pB}`;
-                  }).join("  •  ")||"Singles configured"}
-                </div>
-                <span style={{fontSize:11,color:"var(--green)",fontWeight:600}}>Edit ▶</span>
-              </div>
-            )}
-            {singlesSectionOpen&&singlesMatches.map((sm,smIdx)=>{
+            <div className="section-title" style={{marginBottom:8}}>Singles within autopress (optional)</div>
+            {singlesMatches.map((sm,smIdx)=>{
               const updateSm=(patch)=>setSinglesMatches(prev=>prev.map((x,i)=>i===smIdx?{...x,...patch}:x));
               return(
                 <div key={sm.id} style={{marginBottom:8,padding:"8px 10px",borderRadius:7,border:`1.5px solid ${sm.enabled?"var(--green)":"var(--gray-200)"}`,background:sm.enabled?"#e8f5e9":"var(--gray-50)"}}>
@@ -3474,7 +3454,8 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setTeamSectionOpen(true);setRrSectionOpen(true);setSinglesSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setTeamSectionOpen(true);setRrSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
+              <button className="btn btn-sm btn-gold" style={{marginLeft:6}} onClick={()=>setDone(false)}>🎯 Take Over / Resume</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
