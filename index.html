@@ -255,7 +255,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--gray-8
     order:1;
     width:100%;
     min-width:0;
-    padding:14px 14px calc(72px + env(safe-area-inset-bottom,0));
+    padding:max(14px,env(safe-area-inset-top,14px)) 14px calc(72px + env(safe-area-inset-bottom,0));
     min-height:100vh;
     flex:1;
   }
@@ -2736,6 +2736,7 @@ function ScorecardPage({data,url,refresh}){
   const [rrSectionOpen,setRrSectionOpen]=useState(true);
   const [singlesSectionOpen,setSinglesSectionOpen]=useState(true);
   const [playersSectionOpen,setPlayersSectionOpen]=useState(true);
+  const [matchFmtSectionOpen,setMatchFmtSectionOpen]=useState(true);
   const [startHole,setStartHole]=useState(savedState.startHole || 1);
   const [rrPairs,setRrPairs]=useState(savedState.rrPairs || []);
   const [selTee,setSelTee]=useState(savedState.selTee || null);
@@ -2902,7 +2903,7 @@ function ScorecardPage({data,url,refresh}){
     if(confirm("Are you sure you want to discard this scorecard?")){
       setDone(false);setSel([]);setScores({});setMatchFmt("none");
       setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});
-      setTeamSectionOpen(true);setRrSectionOpen(true);
+      setTeamSectionOpen(true);setRrSectionOpen(true);setMatchFmtSectionOpen(true);
       localStorage.removeItem("llg_scorecard_state");
     }
   };
@@ -3148,31 +3149,28 @@ function ScorecardPage({data,url,refresh}){
 
       {/* ── Setup ── */}
       <div className="card">
-        <div className="card-title">Setup</div>
+        <div className="card-title" style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span>Setup</span>
+          <input type="date" defaultValue={new Date().toISOString().split("T")[0]}
+            style={{fontSize:12,fontFamily:"inherit",border:"1.5px solid var(--gray-200)",borderRadius:6,padding:"3px 7px",color:"var(--gray-700)",background:"white",fontWeight:400}}/>
+        </div>
         <div className="fg fg2" style={{marginBottom:8}}>
           <div className="ff"><label>Course</label>
             <select value={cid||""} onChange={e=>{setCid(e.target.value);setSelTee(null);setDone(false);}}>
               {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
-          <div className="ff"><label>Date</label>
-            <input type="date" defaultValue={new Date().toISOString().split("T")[0]}/>
-          </div>
-        </div>
-        {courseTees.length>0&&(
-          <div className="fg fg2" style={{marginBottom:8}}>
+          {courseTees.length>0&&(
             <div className="ff"><label>Tee</label>
               <select value={effectiveTee||""} onChange={e=>setSelTee(e.target.value)}>
                 {courseTees.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
             </div>
-            {teeData&&(
-              <div className="ff" style={{display:"flex",flexDirection:"column",justifyContent:"flex-end"}}>
-                <div style={{fontSize:11,color:"var(--gray-500)",padding:"6px 0",lineHeight:1.6}}>
-                  Rating <strong>{teeData.rating}</strong> &nbsp;·&nbsp; Slope <strong>{teeData.slope}</strong>
-                </div>
-              </div>
-            )}
+          )}
+        </div>
+        {teeData&&(
+          <div style={{fontSize:11,color:"var(--gray-500)",marginBottom:8,marginTop:-4}}>
+            Rating <strong>{teeData.rating}</strong> &nbsp;·&nbsp; Slope <strong>{teeData.slope}</strong>
           </div>
         )}
         
@@ -3245,8 +3243,11 @@ function ScorecardPage({data,url,refresh}){
 
         {/* Match format */}
         <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginBottom:matchFmt!=="none"?12:0}}>
-          <div className="section-title" style={{marginBottom:8}}>Match format</div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:matchFmtSectionOpen?8:4,cursor:"pointer",userSelect:"none"}} onClick={()=>setMatchFmtSectionOpen(o=>!o)}>
+            <div className="section-title" style={{marginBottom:0}}>Match format{matchFmt!=="none"&&!matchFmtSectionOpen&&<span style={{fontSize:11,marginLeft:6,color:"var(--gray-500)",fontWeight:400,fontFamily:"inherit",textTransform:"none",letterSpacing:0}}>{matchFmt==="autopress"?"🎯 Autopress":"⚔️ Straight matchplay"}</span>}</div>
+            <span style={{fontSize:11,color:"var(--gray-400)",marginLeft:6}}>{matchFmtSectionOpen?"▼":"▶"}</span>
+          </div>
+          {matchFmtSectionOpen&&<div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
             {["none","autopress","matchplay"].map(f=>(
               <button key={f} onClick={()=>{setMatchFmt(f);if(f!==matchFmt){setTeamsDone(false);setSinglesMatches(defaultSinglesMatches);}}}
                 style={{padding:"5px 14px",borderRadius:7,border:"1.5px solid",fontSize:12,fontWeight:600,cursor:"pointer",
@@ -3256,8 +3257,8 @@ function ScorecardPage({data,url,refresh}){
                 {f==="none"?"None":f==="autopress"?"Autopress":"Straight matchplay"}
               </button>
             ))}
-          </div>
-          {matchFmt === "autopress" && teamSectionOpen && (
+          </div>}
+          {matchFmtSectionOpen&&matchFmt === "autopress" && teamSectionOpen && (
             <div className="fg fg2" style={{marginBottom:10}}>
               <div className="ff">
                 <label>Starting Hole</label>
@@ -3267,7 +3268,7 @@ function ScorecardPage({data,url,refresh}){
               </div>
             </div>
           )}
-          {matchFmt!=="none"&&sel.length>=2&&(
+          {matchFmtSectionOpen&&matchFmt!=="none"&&sel.length>=2&&(
             <div>
               {/* Collapsed summary when teams are set */}
               {!teamSectionOpen&&teamA.length===2&&teamA[0]&&teamA[1]&&teamA[0]!==teamA[1]?(
@@ -3324,7 +3325,7 @@ function ScorecardPage({data,url,refresh}){
         </div>
 
         {/* Singles pairings (autopress only) — fully independent from doubles setup */}
-        {matchFmt==="autopress"&&sel.length>=2&&(
+        {matchFmtSectionOpen&&matchFmt==="autopress"&&sel.length>=2&&(
           <div style={{borderTop:"1px solid var(--gray-100)",paddingTop:12,marginTop:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
               <div className="section-title" style={{cursor:"pointer"}} onClick={()=>setSinglesSectionOpen(o=>!o)}>
@@ -3525,7 +3526,7 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});setTeamSectionOpen(true);setRrSectionOpen(true);setSinglesSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});setTeamSectionOpen(true);setRrSectionOpen(true);setSinglesSectionOpen(true);setMatchFmtSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
