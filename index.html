@@ -3155,14 +3155,18 @@ function ScorecardPage({data,url,refresh}){
             style={{fontSize:12,fontFamily:"inherit",border:"1.5px solid var(--gray-200)",borderRadius:6,padding:"3px 7px",color:"var(--gray-700)",background:"white",fontWeight:400}}/>
         </div>
         <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <div style={{flex:2,minWidth:0}}><label>Course</label>
-            <select value={cid||""} onChange={e=>{setCid(e.target.value);setSelTee(null);setDone(false);}} style={{width:"100%"}}>
+          <div style={{flex:2,minWidth:0}}>
+            <label style={{display:"block",fontSize:10.5,fontWeight:700,textTransform:"uppercase",letterSpacing:".6px",color:"var(--gray-600)",marginBottom:4}}>Course</label>
+            <select value={cid||""} onChange={e=>{setCid(e.target.value);setSelTee(null);setDone(false);}}
+              style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--gray-200)",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"var(--gray-800)",background:"white"}}>
               {data.courses.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           {courseTees.length>0&&(
-            <div style={{flex:1,minWidth:0}}><label>Tee</label>
-              <select value={effectiveTee||""} onChange={e=>setSelTee(e.target.value)} style={{width:"100%"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <label style={{display:"block",fontSize:10.5,fontWeight:700,textTransform:"uppercase",letterSpacing:".6px",color:"var(--gray-600)",marginBottom:4}}>Tee</label>
+              <select value={effectiveTee||""} onChange={e=>setSelTee(e.target.value)}
+                style={{width:"100%",padding:"7px 10px",border:"1.5px solid var(--gray-200)",borderRadius:7,fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"var(--gray-800)",background:"white"}}>
                 {courseTees.map(t=><option key={t} value={t}>{t}</option>)}
               </select>
             </div>
