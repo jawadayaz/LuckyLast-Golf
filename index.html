@@ -288,7 +288,7 @@ const LOGO_SRC = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBAU
 const DEFAULT_DATA = {players:[],courses:[],scores:[],tournaments:[]};
 
 // ── API ───────────────────────────────────────────────────────────────────────
-function jsonpGet(url,action){
+function jsonpGet(url,action,extraParams){
   return new Promise((resolve,reject)=>{
     const cb="_llg"+Date.now()+Math.random().toString(36).slice(2);
     const s=document.createElement("script");let done=false;
@@ -296,20 +296,20 @@ function jsonpGet(url,action){
     const t=setTimeout(()=>{clean();reject(new Error("Timed out — check 'Anyone' access"));},15000);
     window[cb]=(d)=>{clean();d&&d.error?reject(new Error(d.error)):resolve(d);};
     s.onerror=()=>{clean();reject(new Error("Script load failed"));};
-    s.src=url+"?action="+action+"&callback="+cb;
+    s.src=url+"?action="+action+(extraParams?"&"+extraParams:"")+"&callback="+cb;
     document.head.appendChild(s);
   });
 }
-async function fetchGet(url,action){
-  const r=await fetch(url+"?action="+action,{redirect:"follow"});
+async function fetchGet(url,action,extraParams){
+  const r=await fetch(url+"?action="+action+(extraParams?"&"+extraParams:""),{redirect:"follow"});
   if(!r.ok)throw new Error("HTTP "+r.status);
   const txt=await r.text();
   try{const j=JSON.parse(txt);if(j.error)throw new Error(j.error);return j;}
   catch(e){throw new Error("Non-JSON: "+txt.slice(0,120));}
 }
-async function apiGet(url,action){
-  try{return await fetchGet(url,action);}
-  catch(e1){try{return await jsonpGet(url,action);}catch(e2){throw new Error(e2.message);}}
+async function apiGet(url,action,extraParams){
+  try{return await fetchGet(url,action,extraParams);}
+  catch(e1){try{return await jsonpGet(url,action,extraParams);}catch(e2){throw new Error(e2.message);}}
 }
 async function apiPost(url,action,data){
   await fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action,data})});
@@ -2729,6 +2729,8 @@ function ScorecardPage({data,url,refresh}){
   const [msg,setMsg]=useState(null);
   const [matchFmt,setMatchFmt]=useState(savedState.matchFmt || "none");
   const dataRef=useRef(data);dataRef.current=data;
+  const sessionStateRef=useRef(null);
+  const [sessionId,setSessionId]=useState(savedState.sessionId||('llg'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)));
   const [teamA,setTeamA]=useState(savedState.teamA || []);
   const teamB = sel.map(p => String(p.id)).filter(id => !teamA.map(String).includes(id));
   const [teamsDone,setTeamsDone]=useState(savedState.teamsDone || false);
@@ -2751,10 +2753,22 @@ function ScorecardPage({data,url,refresh}){
 
   useEffect(() => {
     localStorage.setItem("llg_scorecard_state", JSON.stringify({
-      cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee, singlesMatches, phcOverrides
+      cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee, singlesMatches, phcOverrides, sessionId
     }));
-  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee, singlesMatches, phcOverrides]);
-  
+  }, [cid, sel, scores, done, matchFmt, teamA, teamsDone, startHole, rrPairs, selTee, singlesMatches, phcOverrides, sessionId]);
+
+  // Auto-save live session to GAS cache (debounced 2s) for WhatsApp share link
+  useEffect(()=>{
+    if(!course||!sel.length||!url) return;
+    const timer=setTimeout(()=>{
+      const st=sessionStateRef.current;
+      if(!st||!st.course||!st.sel.length) return;
+      fetch(url,{method:"POST",mode:"no-cors",body:JSON.stringify({action:"saveSession",data:{sessionId,state:st}})}).catch(()=>{});
+    },2000);
+    return()=>clearTimeout(timer);
+  // eslint-disable-next-line
+  },[scores,matchFmt,teamA,startHole,selTee,singlesMatches,phcOverrides,rrPairs,sel.length,cid]);
+
   const [expandedPairs,setExpandedPairs]=useState(new Set());
 
   const course=data.courses.find(c=>String(c.id)===String(cid));
@@ -2778,6 +2792,9 @@ function ScorecardPage({data,url,refresh}){
     const phc=override!=null&&override!==""?parseInt(override):calcPlayingHcp(p.handicap);
     return {...p,handicap:phc};
   });
+
+  // Keep sessionStateRef current for auto-save (captures latest values each render)
+  sessionStateRef.current={course,sel:selWithPhcp,scores,matchFmt,teamA,startHole,selTee,singlesMatches,phcOverrides,rrPairs,date:new Date().toISOString().split("T")[0]};
 
   const N=(txt,tp="ok")=>{setMsg({t:txt,tp});setTimeout(()=>setMsg(null),4000);};
 
@@ -2904,6 +2921,7 @@ function ScorecardPage({data,url,refresh}){
       setDone(false);setSel([]);setScores({});setMatchFmt("none");
       setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});
       setTeamSectionOpen(true);setRrSectionOpen(true);setMatchFmtSectionOpen(true);
+      setSessionId('llg'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));
       localStorage.removeItem("llg_scorecard_state");
     }
   };
@@ -2968,6 +2986,8 @@ function ScorecardPage({data,url,refresh}){
 
   const sendWhatsApp=async()=>{
     const txt=buildWaText();
+    const liveLink=`${PAGES_BASE}?session=${sessionId}`;
+    const fullText=(txt?txt+"\n\n":"")+"📱 Live scorecard: "+liveLink;
     const imgData=generateScorecardImage();
     // Try native share (mobile) — shares image file directly to WhatsApp or any app
     if(navigator.share){
@@ -2975,14 +2995,13 @@ function ScorecardPage({data,url,refresh}){
         const res=await fetch(imgData);
         const blob=await res.blob();
         const file=new File([blob],"scorecard.png",{type:"image/png"});
-        const shareData={files:[file],text:txt||undefined,title:"Scorecard"};
+        const shareData={files:[file],text:fullText,title:"Scorecard"};
         if(navigator.canShare&&navigator.canShare(shareData)){
           await navigator.share(shareData);
           return;
         }
       }catch(e){
-        if(e.name==="AbortError")return; // user cancelled share sheet
-        // fall through to download fallback
+        if(e.name==="AbortError")return;
       }
     }
     // Fallback: download image + open wa.me with text
@@ -2992,8 +3011,7 @@ function ScorecardPage({data,url,refresh}){
       a.download="scorecard.png";
       document.body.appendChild(a);a.click();document.body.removeChild(a);
     }catch(e){}
-    if(txt)window.open(`https://wa.me/?text=${encodeURIComponent(txt)}`,"_blank");
-    else N("No results to share yet","warn");
+    window.open(`https://wa.me/?text=${encodeURIComponent(fullText)}`,"_blank");
   };
 
   const generateScorecardImage=()=>{
@@ -3076,8 +3094,8 @@ function ScorecardPage({data,url,refresh}){
     return canvas.toDataURL("image/png");
   };
 
-  const doSave=async()=>{
-    if(!canSubmit)return N("Need at least 14 holes scored for 2 or more players","warn");
+  const submit=async()=>{
+    if(!canSubmit)return N("Need at least 14 holes scored for 2+ players","warn");
     if(!course||!sel.length)return N("Select a course and at least one player","error");
     setBusy(true);
     try{
@@ -3087,45 +3105,10 @@ function ScorecardPage({data,url,refresh}){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
         await refresh();
       }
-      N("Scores saved ✔");
-      // NOTE: Save intentionally does NOT set done=true — card stays open for editing
-    }catch(e){N("Error: "+e.message,"error");}
-    setBusy(false);
-  };
-
-  const doSubmit=async(emailAddr)=>{
-    setEmailDlg(false);
-    if(!course||!sel.length)return N("Select a course and at least one player","error");
-    setBusy(true);
-    try{
-      const date=new Date().toISOString().split("T")[0];
-      const results=calcFormats(selWithPhcp.map(p=>({playerId:p.id,playerName:p.name,handicap:p.handicap,scores:scores[p.id]||Array(18).fill(0)})),course);
-      if(url){
-        await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
-        await refresh();
-      }
-      if(emailAddr.trim()){
-        const dateStr=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-        const subject=`Scorecard — ${course.name} — ${dateStr}`;
-        const body=`Scorecard for ${course.name} on ${dateStr}\n\n${buildWaText().replace(/\*/g,"")}`;
-        const imgData=generateScorecardImage();
-        if(url){
-          const r=await apiPostCors(url,"sendEmail",{to:emailAddr.trim(),subject,body,imageBase64:imgData});
-          if(r&&r.error)N("Email error: "+r.error,"error");
-          else N("Email sent ✔");
-        }else{
-          N("No GAS URL — email not sent","warn");
-        }
-      }
-      N("Scores saved ✔");
+      N("Submitted ✔");
       setDone(true);
     }catch(e){N("Error: "+e.message,"error");}
     setBusy(false);
-  };
-
-  const submit=()=>{
-    if(!canSubmit)return N("Need at least 14 holes scored for 2 or more players","warn");
-    setEmailDlg(true);
   };
 
   if(!data.courses.length)return(
@@ -3139,8 +3122,6 @@ function ScorecardPage({data,url,refresh}){
     const sc=scores[r.playerId]||[];
     return sc.filter(v=>parseInt(v)>0).length>=14;
   }).length>=2;
-  const [emailDlg,setEmailDlg]=useState(false);
-  const [emailVal,setEmailVal]=useState("tour@kga.in");
 
   return(
     <div>
@@ -3483,24 +3464,6 @@ function ScorecardPage({data,url,refresh}){
       </div>
 
       {/* ── Email dialog ── */}
-      {emailDlg&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"white",borderRadius:14,padding:"22px 20px",maxWidth:360,width:"100%",boxShadow:"0 8px 32px rgba(0,0,0,.2)"}}>
-            <div style={{fontFamily:"'Playfair Display',serif",fontSize:17,fontWeight:700,color:"var(--green)",marginBottom:6}}>Send Scorecard</div>
-            <p style={{fontSize:13,color:"var(--gray-600)",marginBottom:14,lineHeight:1.5}}>Enter email address(es) to send to. Separate multiple with commas.</p>
-            <input value={emailVal} onChange={e=>setEmailVal(e.target.value)}
-              style={{width:"100%",marginBottom:14,padding:"8px 10px",borderRadius:7,border:"1.5px solid var(--gray-200)",fontSize:13}}
-              placeholder="email@example.com"/>
-            <div style={{display:"flex",gap:8}}>
-              <button className="btn btn-ghost btn-sm" style={{flex:1}} onClick={()=>setEmailDlg(false)}>Cancel</button>
-              <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={()=>doSubmit(emailVal)} disabled={busy}>
-                {busy?<><Spin/>Sending…</>:"✉ Send & Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Scorecard grid ── */}
       {sel.length>0&&course&&(
         <div className="card">
@@ -3511,13 +3474,7 @@ function ScorecardPage({data,url,refresh}){
               <button className="btn btn-primary" onClick={submit} disabled={busy}
                 style={{opacity:canSubmit?1:0.5}}
                 title={canSubmit?"":"Need 14+ holes for 2+ players"}>
-                {busy?<><Spin/>Saving…</>:"Submit & Email"}
-              </button>
-              <button className="btn btn-ghost" onClick={doSave} disabled={busy}
-                data-testid="save-btn"
-                style={{opacity:canSubmit?1:0.5,border:"1.5px solid var(--green)",color:"var(--green)"}}
-                title={canSubmit?"":"Need 14+ holes for 2+ players"}>
-                {busy?<><Spin/>Saving…</>:"Save"}
+                {busy?<><Spin/>Submitting…</>:"Submit"}
               </button>
               <button className="btn btn-ghost" onClick={refreshHI} disabled={busy}
                 style={{border:"1.5px solid var(--blue)",color:"var(--blue)"}}
@@ -3530,7 +3487,7 @@ function ScorecardPage({data,url,refresh}){
           ):(
             <div className="alert alert-ok" style={{marginTop:12}}>
               ✓ Submitted!
-              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});setTeamSectionOpen(true);setRrSectionOpen(true);setSinglesSectionOpen(true);setMatchFmtSectionOpen(true);localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
+              <button className="btn btn-sm btn-ghost" style={{marginLeft:9}} onClick={()=>{setDone(false);setSel([]);setScores({});setMatchFmt("none");setTeamA([]);setRrPairs([]);setTeamsDone(false);setStartHole(1);setSelTee(null);setSinglesMatches(defaultSinglesMatches);setPhcOverrides({});setTeamSectionOpen(true);setRrSectionOpen(true);setSinglesSectionOpen(true);setMatchFmtSectionOpen(true);setSessionId('llg'+Date.now().toString(36)+Math.random().toString(36).slice(2,6));localStorage.removeItem("llg_scorecard_state");}}>New Card</button>
               <button className="btn btn-sm btn-wa" style={{marginLeft:6}} onClick={sendWhatsApp}>📲 WhatsApp</button>
             </div>
           )}
@@ -3678,6 +3635,224 @@ function ScorecardPage({data,url,refresh}){
   );
 }
 
+// ── Shared constants ──────────────────────────────────────────────────────────
+const DEFAULT_GAS="https://script.google.com/macros/s/AKfycbxSjwX5TkBaVqovp21rQhLnXwIOIolxMq_pmTPAXOPr2P2hGoJkT6Gyb9v5eiQpckwH/exec";
+const PAGES_BASE="https://jawadayaz.github.io/LuckyLast-Golf/";
+
+// ── Read-only live scorecard view ─────────────────────────────────────────────
+function ReadonlyScorecard({sessionId}){
+  const [state,setState]=useState(null);
+  const [lastUpdate,setLastUpdate]=useState(null);
+  const [loadError,setLoadError]=useState(null);
+  const [refreshing,setRefreshing]=useState(false);
+  const [expandedSections,setExpandedSections]=useState(new Set());
+  const [expandedPairs,setExpandedPairs]=useState(new Set());
+  const gasUrl=localStorage.getItem(LS_URL)||DEFAULT_GAS;
+
+  const load=useCallback(async()=>{
+    setRefreshing(true);
+    try{
+      const r=await apiGet(gasUrl,"getSession","sessionId="+encodeURIComponent(sessionId));
+      if(r.ok&&r.state){setState(r.state);setLastUpdate(new Date());setLoadError(null);}
+      else setLoadError(r.error||"Session not found or expired");
+    }catch(e){setLoadError(e.message);}
+    setRefreshing(false);
+  },[sessionId,gasUrl]);
+
+  useEffect(()=>{load();const iv=setInterval(load,30000);return()=>clearInterval(iv);},[load]);
+
+  const toggleSection=(key)=>setExpandedSections(prev=>{const n=new Set(prev);n.has(key)?n.delete(key):n.add(key);return n;});
+  const togglePair=(i)=>setExpandedPairs(prev=>{const n=new Set(prev);n.has(i)?n.delete(i):n.add(i);return n;});
+
+  if(!state&&loadError)return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",padding:24,textAlign:"center",gap:12}}>
+      <div style={{fontSize:32}}>⛳</div>
+      <div style={{fontWeight:700,color:"var(--green)",fontSize:16}}>Scorecard not found</div>
+      <div style={{fontSize:13,color:"var(--gray-500)"}}>This link may have expired (links last 6 hours).</div>
+    </div>
+  );
+  if(!state)return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:16,background:"var(--green)"}}>
+      <img src={LOGO_SRC} style={{width:80,height:80,borderRadius:"50%",border:"3px solid var(--gold-light)"}}/>
+      <div style={{fontFamily:"Playfair Display,serif",fontSize:18,fontWeight:700,color:"var(--gold-light)"}}>Lucky Last Golfers</div>
+      <div style={{color:"rgba(255,255,255,.7)",fontSize:13,display:"flex",alignItems:"center",gap:8}}><span className="spinner"/>Loading scorecard…</div>
+    </div>
+  );
+
+  const {course,sel,scores,matchFmt,teamA,startHole,selTee,singlesMatches,rrPairs,date}=state;
+  const teeData=course?.tees?.[selTee]||null;
+  const teamB=sel.map(p=>String(p.id)).filter(id=>!teamA.map(String).includes(id));
+  const tAPlayers=sel.filter(p=>teamA.map(String).includes(String(p.id)));
+  const tBPlayers=sel.filter(p=>teamB.includes(String(p.id)));
+  const canMatch=tAPlayers.length>=1&&tBPlayers.length>=1;
+  const tAName=tAPlayers.map(p=>p.name.split(" ")[0]).join("/");
+  const tBName=tBPlayers.map(p=>p.name.split(" ")[0]).join("/");
+  const siOff=(startHole-1)%18;
+  const allIdxs=Array.from({length:18},(_,i)=>(siOff+i)%18);
+  const f9Idxs=allIdxs.slice(0,9);const b9Idxs=allIdxs.slice(9);
+  const f9Label=startHole===1?"Front 9":`Holes ${startHole}–${startHole+8>18?startHole+8-18:startHole+8} (F9)`;
+  const b9Label=startHole===1?"Back 9":`Holes ${startHole+9>18?startHole+9-18:startHole+9}–${startHole+17>18?startHole+17-18:startHole+17} (B9)`;
+  const fn=matchFmt==="autopress"?calcAutopress:calcStraightMatchplay;
+  const matchResults=(matchFmt!=="none"&&canMatch)?{f9:fn(f9Idxs,tAPlayers,tBPlayers,scores,course),b9:fn(b9Idxs,tAPlayers,tBPlayers,scores,course),f18:fn(allIdxs,tAPlayers,tBPlayers,scores,course),f9Label,b9Label}:null;
+  const activeSingles=(singlesMatches||[]).filter(sm=>sm.enabled&&sm.pAId&&sm.pBId);
+  const singlesResults=(matchFmt==="autopress"&&activeSingles.length)?activeSingles.map(sm=>{
+    const pA=sel.find(p=>String(p.id)===String(sm.pAId));
+    const pB=sel.find(p=>String(p.id)===String(sm.pBId));
+    if(!pA||!pB)return null;
+    return{pA,pB,f9:calcAutopress(f9Idxs,[pA],[pB],scores,course),b9:calcAutopress(b9Idxs,[pA],[pB],scores,course),f18:calcAutopress(allIdxs,[pA],[pB],scores,course),f9Label,b9Label};
+  }).filter(Boolean):null;
+  const rrResults_ro=(rrPairs||[]).filter(rp=>rp.p1Id&&rp.p2Id).map(rp=>{
+    const p1=sel.find(p=>String(p.id)===String(rp.p1Id));
+    const p2=sel.find(p=>String(p.id)===String(rp.p2Id));
+    if(!p1||!p2)return null;
+    return calcPair({p1,p2,diff:rp.diff,higherPId:rp.higherPId},course,scores);
+  }).filter(Boolean);
+
+  const fmtR=(r,label,isHalf,nameA,nameB)=>{
+    const winner=r.net>0?nameA:r.net<0?nameB:null;
+    const n=Math.abs(r.net);
+    const unit=isHalf?(n===1?"half":"halves"):(n===1?"match":"matches");
+    const txt=winner?`${winner} ${n} ${unit} up`:"All square";
+    const col=r.net>0?"var(--green)":r.net<0?"var(--blue)":"var(--gray-600)";
+    return(
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid var(--gray-100)"}}>
+        <span style={{fontSize:13,fontWeight:600,color:"var(--gray-600)"}}>{label}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:13,fontWeight:700,color:col}}>{txt}</span>
+          <span style={{fontFamily:"monospace",fontSize:12,padding:"2px 8px",background:"var(--gray-50)",borderRadius:6,color:"var(--gray-500)"}}>{r.state}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const CollCard=({sectionKey,title,subtitle,children})=>{
+    const open=expandedSections.has(sectionKey);
+    return(
+      <div className="card" style={{marginBottom:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",userSelect:"none"}} onClick={()=>toggleSection(sectionKey)}>
+          <div>
+            <div style={{fontFamily:"Playfair Display,serif",fontSize:15,color:"var(--green)",fontWeight:700}}>{title}</div>
+            {subtitle&&<div style={{fontSize:11,color:"var(--gray-400)",marginTop:1}}>{subtitle}</div>}
+          </div>
+          <span style={{fontSize:12,color:"var(--gray-400)",marginLeft:8}}>{open?"▼":"▶"}</span>
+        </div>
+        {open&&<div style={{marginTop:10,borderTop:"1px solid var(--gray-100)",paddingTop:6}}>{children}</div>}
+      </div>
+    );
+  };
+
+  return(
+    <div style={{maxWidth:640,margin:"0 auto",padding:"max(16px,env(safe-area-inset-top,16px)) 14px 60px",fontFamily:"'DM Sans',sans-serif"}}>
+      <div style={{background:"var(--green)",borderRadius:12,padding:"16px",marginBottom:12,color:"white"}}>
+        <div style={{fontFamily:"Playfair Display,serif",fontSize:19,fontWeight:700,color:"var(--gold-light)"}}>{course.name}</div>
+        {selTee&&<div style={{fontSize:12,opacity:.85,marginTop:3}}>{selTee}{teeData?` · Rating ${teeData.rating} · Slope ${teeData.slope}`:""}</div>}
+        <div style={{fontSize:12,opacity:.8,marginTop:2}}>{date}</div>
+        <div style={{display:"flex",alignItems:"center",gap:6,marginTop:8,fontSize:11,color:"rgba(255,255,255,.75)"}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#4cef7a",flexShrink:0,display:"inline-block"}}/>
+          Live · auto-refreshes every 30s{lastUpdate&&` · updated ${lastUpdate.toLocaleTimeString()}`}
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:10}}>
+        <div className="card-title">{course.name}</div>
+        <ScorecardGrid course={course} players={sel} scores={scores} setScore={null} locked={true} showMsf={true}/>
+        <div style={{marginTop:12}}>
+          <button className="btn btn-ghost" style={{border:"1.5px solid var(--green)",color:"var(--green)",width:"100%"}} onClick={load} disabled={refreshing}>
+            {refreshing?<><Spin/>Refreshing…</>:"↺ Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {matchResults&&canMatch&&(
+        <CollCard sectionKey="match"
+          title={matchFmt==="autopress"?(singlesResults?"🎯 Doubles":"🎯 Autopress"):"⚔️ Straight matchplay"}
+          subtitle={`${tAName} vs ${tBName}`}>
+          {fmtR(matchResults.f9,matchResults.f9Label||"Front 9",true,tAName,tBName)}
+          {fmtR(matchResults.b9,matchResults.b9Label||"Back 9",true,tAName,tBName)}
+          {fmtR(matchResults.f18,"Full 18",false,tAName,tBName)}
+        </CollCard>
+      )}
+
+      {singlesResults&&singlesResults.map((sr,i)=>{
+        const pAn=sr.pA.name.split(" ")[0],pBn=sr.pB.name.split(" ")[0];
+        return(
+          <CollCard key={i} sectionKey={"singles"+i} title="🎯 Singles" subtitle={`${pAn} vs ${pBn}`}>
+            {fmtR(sr.f9,sr.f9Label||"Front 9",true,pAn,pBn)}
+            {fmtR(sr.b9,sr.b9Label||"Back 9",true,pAn,pBn)}
+            {fmtR(sr.f18,"Full 18",false,pAn,pBn)}
+          </CollCard>
+        );
+      })}
+
+      {rrResults_ro.map((r,i)=>{
+        const p1n=r.p1.name.split(" ")[0],p2n=r.p2.name.split(" ")[0];
+        const scoredHoles=r.holes.filter(h=>h.net1!==null);
+        const totalNet1=scoredHoles.reduce((a,h)=>a+h.net1,0);
+        const totalNet2=scoredHoles.reduce((a,h)=>a+h.net2,0);
+        const ptsWinner=r.pts1>r.pts2?p1n:r.pts2>r.pts1?p2n:null;
+        const ptsDiff=Math.abs(r.pts1-r.pts2);
+        const netWinnerName=totalNet1<totalNet2?p1n:totalNet2<totalNet1?p2n:null;
+        const netDiff=Math.abs(totalNet1-totalNet2);
+        let summary;
+        if(ptsWinner&&netWinnerName){
+          if(ptsWinner===netWinnerName)summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} and ${netDiff} stroke${netDiff!==1?"s":""}`;
+          else summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} · ${netWinnerName} leads by ${netDiff} stroke${netDiff!==1?"s":""}`;
+        }else if(ptsWinner)summary=`${ptsWinner} leads by ${ptsDiff} pt${ptsDiff!==1?"s":""} (Strokeplay tied)`;
+        else if(netWinnerName)summary=`${netWinnerName} leads by ${netDiff} stroke${netDiff!==1?"s":""} (Stableford tied)`;
+        return(
+          <CollCard key={i} sectionKey={"rr"+i} title={`Pair ${i+1}: ${r.p1.name.split(" ")[0]} vs ${r.p2.name.split(" ")[0]}`}
+            subtitle={r.hcpDiff>0?`+${r.hcpDiff} to ${r.p1Higher?r.p1.name.split(" ")[0]:r.p2.name.split(" ")[0]}`:undefined}>
+            <div style={{marginBottom:8,padding:"8px 10px",background:summary?"#f0faf4":"var(--gray-100)",borderRadius:7,textAlign:"center"}}>
+              {summary?<span style={{fontSize:13,fontWeight:700,color:"var(--green)"}}>🏆 {summary}</span>:<span style={{fontSize:13,color:"var(--gray-400)",fontStyle:"italic"}}>🤝 All square</span>}
+            </div>
+            <button onClick={()=>togglePair(i)} style={{width:"100%",background:"var(--gray-100)",border:"none",borderRadius:6,padding:"5px 10px",fontSize:11,fontWeight:600,color:"var(--gray-500)",cursor:"pointer",marginBottom:8}}>
+              {expandedPairs.has(i)?"▲ Hide hole detail":"▼ Show hole by hole"}
+            </button>
+            {expandedPairs.has(i)&&(
+              <div style={{overflowX:"auto",marginBottom:4}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                  <thead>
+                    <tr style={{background:"var(--green)",color:"white"}}>
+                      {["Hole","SI","Par",p1n,p2n,"Allow",p1n+" Pts",p2n+" Pts",p1n+" Net",p2n+" Net"].map((h,i)=><th key={i} style={{padding:"4px 5px",textAlign:"center",color:i>=6&&i<=7?"#a8ffc4":i>=8?"#ffd580":"white"}}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {r.holes.map((h,hi)=>{
+                      const scored=h.g1!==null&&h.g2!==null;
+                      const p1wins=scored&&h.holeDiff>0,p2wins=scored&&h.holeDiff<0;
+                      return(
+                        <tr key={hi} style={{background:hi%2===0?"#fafafa":"white"}}>
+                          <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700}}>{h.hole}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{h.si}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center"}}>{h.par}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p1wins?700:400,color:p1wins?"var(--green)":"inherit"}}>{h.g1??""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",fontWeight:p2wins?700:400,color:p2wins?"var(--green)":"inherit"}}>{h.g2??""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-400)",fontSize:10}}>{scored?(h.allow>0?"+1":"·"):""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p1wins?"var(--green)":"var(--gray-300)"}}>{scored?(p1wins?h.sf1:"—"):""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",fontWeight:700,color:p2wins?"var(--green)":"var(--gray-300)"}}>{scored?(p2wins?h.sf2:"—"):""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net1:""}</td>
+                          <td style={{padding:"3px 5px",textAlign:"center",color:"var(--gray-600)",fontSize:10}}>{scored?h.net2:""}</td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{background:"#1a4731",color:"white",fontWeight:700,fontSize:11}}>
+                      <td colSpan={6} style={{padding:"5px 6px",textAlign:"right",letterSpacing:.5}}>TOTAL</td>
+                      <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts1}</td>
+                      <td style={{padding:"5px 6px",textAlign:"center",color:"#a8ffc4"}}>{r.pts2}</td>
+                      <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet1}</td>
+                      <td style={{padding:"5px 6px",textAlign:"center",color:"#ffd580"}}>{totalNet2}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CollCard>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── App Shell ─────────────────────────────────────────────────────────────────
 const NAV=[
   {id:"players",    ico:"👤", label:"Players"},
@@ -3688,12 +3863,14 @@ const NAV=[
 ];
 
 function App(){
+  const sessionParam=new URLSearchParams(window.location.search).get("session");
+  if(sessionParam)return <ReadonlyScorecard sessionId={sessionParam}/>;
+
   const [page,setPage]=useState(()=>{
     // Always go to tournaments - GAS URL is hardcoded so setup is never needed on first load
     const hasHash=window.location.hash&&window.location.hash.includes("url=");
     return (localStorage.getItem(LS_URL)||hasHash||true)?"scorecard":"setup";
   });
-  const DEFAULT_GAS="https://script.google.com/macros/s/AKfycbxSjwX5TkBaVqovp21rQhLnXwIOIolxMq_pmTPAXOPr2P2hGoJkT6Gyb9v5eiQpckwH/exec";
   const [url,setUrl]=useState(()=>{
     // Check URL hash for shared link: #url=GAS_URL
     try{
