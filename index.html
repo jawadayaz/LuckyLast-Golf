@@ -730,7 +730,7 @@ function SetupPage({url,setUrl,onTest,status,admin,onLogout}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Setup</h2><p>Logged in as {admin}</p></div>
+        <div className="ph-left"><h2>Setup</h2></div>
         <button className="btn btn-ghost btn-sm" onClick={onLogout}>Logout</button>
       </div>
       <div className="card">
@@ -846,7 +846,7 @@ function PlayersPage({data,url,refresh,setData}){
 
   return(
     <div>
-      <div className="ph"><div className="ph-left"><h2>Players</h2><p>Manage the Lucky Last roster</p></div></div>
+      <div className="ph"><div className="ph-left"><h2>Players</h2></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
       <div className="card">
         <div className="card-title">Add Player</div>
@@ -1086,7 +1086,7 @@ function CoursesPage({data,url,refresh,setData}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Courses</h2><p>Add via scorecard image or manually</p></div>
+        <div className="ph-left"><h2>Courses</h2></div>
         <button className="btn btn-primary" onClick={()=>{setShowForm(!showForm);setEditId(null);setForm(blank());}}>{showForm&&!editId?"Cancel":"+ Add Course"}</button>
       </div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
@@ -1341,7 +1341,7 @@ function TournamentPage({data,url,refresh}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Tournaments</h2><p>{tourns.length} tournament{tourns.length!==1?"s":""} saved locally</p></div>
+        <div className="ph-left"><h2>Tournaments</h2></div>
         <button className="btn btn-primary" onClick={newT} disabled={!data.courses.length}>{!data.courses.length?"Add a course first":"+ New Tournament"}</button>
       </div>
       {!tourns.length&&(
@@ -1455,7 +1455,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>{t.name||"New Tournament"}</h2><p>Tournament setup</p></div>
+        <div className="ph-left"><h2>{t.name||"New Tournament"}</h2></div>
         <div style={{display:"flex",gap:7}}>
           <button className="btn btn-ghost" onClick={onBack}>← All</button>
           <button className="btn btn-primary" onClick={()=>{
@@ -1882,7 +1882,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
     return(
       <div>
         <div className="ph">
-          <div className="ph-left"><h2>{t.name}</h2><p>Viewing Group — {players.map(p=>p.name).join(", ")}</p></div>
+          <div className="ph-left"><h2>{t.name}</h2></div>
           <button className="btn btn-ghost" onClick={()=>setViewGid(null)}>← Back to Groups</button>
         </div>
         <div className={"alert "+(complete?"alert-ok":"alert-info")} style={{marginBottom:12}}>
@@ -1925,7 +1925,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
       <>
         <div>
         <div className="ph">
-          <div className="ph-left"><h2>{t.name}</h2><p>Scoring: {players.map(p=>p.name).join(", ")}</p></div>
+          <div className="ph-left"><h2>{t.name}</h2></div>
           <button className="btn btn-ghost" onClick={()=>saveAndExit(g.id)}>← Save & Exit</button>
         </div>
         {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
@@ -1980,7 +1980,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>{t.name}</h2><p>{course.name} · {t.groups.length} group{t.groups.length!==1?"s":""}</p></div>
+        <div className="ph-left"><h2>{t.name}</h2></div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           <button className="btn btn-ghost" onClick={onBack}>← All Tournaments</button>
           <button className="btn btn-ghost btn-sm" onClick={onSetup}>⚙ Setup</button>
@@ -2311,7 +2311,6 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
         <div className="ph-left">
           <h2 style={{display:"flex",alignItems:"center",gap:8}}>
             {isLive&&<span className="live-dot"/>}{t.name}
-          </h2>
           <p>{course.name} {isLive?"· Live results":"· Final results"}</p>
         </div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
@@ -3127,7 +3126,7 @@ function ScorecardPage({data,url,refresh}){
   };
 
   if(!data.courses.length)return(
-    <div><div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Add a course first</p></div></div>
+    <div><div className="ph"><div className="ph-left"><h2>Scorecard</h2></div></div>
       <div className="card"><p style={{color:"var(--gray-400)",fontSize:13}}>No courses available. Add one in the Courses tab.</p></div>
     </div>
   );
@@ -3140,7 +3139,7 @@ function ScorecardPage({data,url,refresh}){
 
   return(
     <div>
-      <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard</p></div></div>
+      <div className="ph"><div className="ph-left"><h2>Scorecard</h2></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
 
       {/* ── Setup ── */}
