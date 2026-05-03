@@ -2311,7 +2311,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
         <div className="ph-left">
           <h2 style={{display:"flex",alignItems:"center",gap:8}}>
             {isLive&&<span className="live-dot"/>}{t.name}
-          <p>{course.name} {isLive?"· Live results":"· Final results"}</p>
+          </h2>
         </div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           <button className="btn btn-ghost" onClick={onBack}>← All</button>
