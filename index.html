@@ -730,7 +730,7 @@ function SetupPage({url,setUrl,onTest,status,admin,onLogout}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Setup</h2></div>
+        <div className="ph-left"><h2>Setup</h2><p>Logged in as {admin}</p></div>
         <button className="btn btn-ghost btn-sm" onClick={onLogout}>Logout</button>
       </div>
       <div className="card">
@@ -846,7 +846,7 @@ function PlayersPage({data,url,refresh,setData}){
 
   return(
     <div>
-      <div className="ph"><div className="ph-left"><h2>Players</h2></div></div>
+      <div className="ph"><div className="ph-left"><h2>Players</h2><p>Manage the Lucky Last roster</p></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
       <div className="card">
         <div className="card-title">Add Player</div>
@@ -1086,7 +1086,7 @@ function CoursesPage({data,url,refresh,setData}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Courses</h2></div>
+        <div className="ph-left"><h2>Courses</h2><p>Add via scorecard image or manually</p></div>
         <button className="btn btn-primary" onClick={()=>{setShowForm(!showForm);setEditId(null);setForm(blank());}}>{showForm&&!editId?"Cancel":"+ Add Course"}</button>
       </div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
@@ -1341,7 +1341,7 @@ function TournamentPage({data,url,refresh}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>Tournaments</h2></div>
+        <div className="ph-left"><h2>Tournaments</h2><p>{tourns.length} tournament{tourns.length!==1?"s":""} saved locally</p></div>
         <button className="btn btn-primary" onClick={newT} disabled={!data.courses.length}>{!data.courses.length?"Add a course first":"+ New Tournament"}</button>
       </div>
       {!tourns.length&&(
@@ -1455,7 +1455,7 @@ function TournSetup({t,course,data,updateT,onBack,onStart}){
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>{t.name||"New Tournament"}</h2></div>
+        <div className="ph-left"><h2>{t.name||"New Tournament"}</h2><p>Tournament setup</p></div>
         <div style={{display:"flex",gap:7}}>
           <button className="btn btn-ghost" onClick={onBack}>← All</button>
           <button className="btn btn-primary" onClick={()=>{
@@ -1882,7 +1882,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
     return(
       <div>
         <div className="ph">
-          <div className="ph-left"><h2>{t.name}</h2></div>
+          <div className="ph-left"><h2>{t.name}</h2><p>Viewing Group — {players.map(p=>p.name).join(", ")}</p></div>
           <button className="btn btn-ghost" onClick={()=>setViewGid(null)}>← Back to Groups</button>
         </div>
         <div className={"alert "+(complete?"alert-ok":"alert-info")} style={{marginBottom:12}}>
@@ -1925,7 +1925,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
       <>
         <div>
         <div className="ph">
-          <div className="ph-left"><h2>{t.name}</h2></div>
+          <div className="ph-left"><h2>{t.name}</h2><p>Scoring: {players.map(p=>p.name).join(", ")}</p></div>
           <button className="btn btn-ghost" onClick={()=>saveAndExit(g.id)}>← Save & Exit</button>
         </div>
         {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
@@ -1980,7 +1980,7 @@ function TournScoring({t,course,data,updateT,url,refresh,onBack,onGoResults,onSe
   return(
     <div>
       <div className="ph">
-        <div className="ph-left"><h2>{t.name}</h2></div>
+        <div className="ph-left"><h2>{t.name}</h2><p>{course.name} · {t.groups.length} group{t.groups.length!==1?"s":""}</p></div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           <button className="btn btn-ghost" onClick={onBack}>← All Tournaments</button>
           <button className="btn btn-ghost btn-sm" onClick={onSetup}>⚙ Setup</button>
@@ -2312,6 +2312,7 @@ function TournResults({t,course,data,updateT,url,refresh,onBack,onScoring}){
           <h2 style={{display:"flex",alignItems:"center",gap:8}}>
             {isLive&&<span className="live-dot"/>}{t.name}
           </h2>
+          <p>{course.name} {isLive?"· Live results":"· Final results"}</p>
         </div>
         <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           <button className="btn btn-ghost" onClick={onBack}>← All</button>
@@ -2751,6 +2752,8 @@ function ScorecardPage({data,url,refresh}){
   });
   const [phcOverrides,setPhcOverrides]=useState(savedState.phcOverrides||{});
   const [phcSectionOpen,setPhcSectionOpen]=useState(false);
+  const [showEmailDialog,setShowEmailDialog]=useState(false);
+  const [emailVal,setEmailVal]=useState("");
 
   useEffect(() => {
     localStorage.setItem("llg_scorecard_state", JSON.stringify({
@@ -3108,9 +3111,9 @@ function ScorecardPage({data,url,refresh}){
     return canvas.toDataURL("image/png");
   };
 
-  const submit=async()=>{
-    if(!canSubmit)return N("Need at least 14 holes scored for 2+ players","warn");
-    if(!course||!sel.length)return N("Select a course and at least one player","error");
+  const handleSendAndSave=async()=>{
+    if(!emailVal.trim())return N("Enter an email address","warn");
+    setShowEmailDialog(false);
     setBusy(true);
     try{
       const date=new Date().toISOString().split("T")[0];
@@ -3119,14 +3122,32 @@ function ScorecardPage({data,url,refresh}){
         await apiPost(url,"addScores",results.map(r=>({...r,date,courseId:course.id,courseName:course.name,tournament:"",scores:scores[r.playerId]||Array(18).fill(0)})));
         await refresh();
       }
-      N("Submitted ✔");
+      const imgData=generateScorecardImage();
+      const emailBody=buildWaText();
+      try{
+        const emailResult=url?await apiPostCors(url,"sendEmail",{
+          to:emailVal.trim(),
+          subject:`LuckyLast Golf — ${course.name} — ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}`,
+          body:emailBody,
+          imageBase64:imgData
+        }):null;
+        if(emailResult&&emailResult.success){N("Email sent ✔");}
+        else if(emailResult&&emailResult.error){N("Email error: "+emailResult.error,"warn");}
+        else{N("Scores saved ✔");}
+      }catch(e2){N("Scores saved ✔");}
       setDone(true);
     }catch(e){N("Error: "+e.message,"error");}
     setBusy(false);
   };
 
+  const submit=async()=>{
+    if(!canSubmit)return N("Need at least 14 holes scored for 2+ players","warn");
+    if(!course||!sel.length)return N("Select a course and at least one player","error");
+    setShowEmailDialog(true);
+  };
+
   if(!data.courses.length)return(
-    <div><div className="ph"><div className="ph-left"><h2>Scorecard</h2></div></div>
+    <div><div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Add a course first</p></div></div>
       <div className="card"><p style={{color:"var(--gray-400)",fontSize:13}}>No courses available. Add one in the Courses tab.</p></div>
     </div>
   );
@@ -3139,7 +3160,7 @@ function ScorecardPage({data,url,refresh}){
 
   return(
     <div>
-      <div className="ph"><div className="ph-left"><h2>Scorecard</h2></div></div>
+      <div className="ph"><div className="ph-left"><h2>Scorecard</h2><p>Standalone scorecard</p></div></div>
       {msg&&<Alrt type={msg.tp} msg={msg.t} onClose={()=>setMsg(null)}/>}
 
       {/* ── Setup ── */}
@@ -3478,6 +3499,23 @@ function ScorecardPage({data,url,refresh}){
       </div>
 
       {/* ── Email dialog ── */}
+      {showEmailDialog&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{background:"white",borderRadius:12,padding:24,width:320,maxWidth:"90vw",boxShadow:"0 8px 32px rgba(0,0,0,0.2)"}}>
+            <div style={{fontWeight:700,fontSize:16,marginBottom:16,color:"var(--green-dark)"}}>Submit & Email Scorecard</div>
+            <label style={{display:"block",fontSize:12,fontWeight:600,color:"var(--gray-600)",marginBottom:6}}>Send to email address</label>
+            <input type="email" placeholder="Enter email address"
+              value={emailVal} onChange={e=>setEmailVal(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&handleSendAndSave()}
+              style={{width:"100%",padding:"9px 11px",border:"1.5px solid var(--gray-200)",borderRadius:7,fontFamily:"inherit",fontSize:14,boxSizing:"border-box",marginBottom:16}}
+              autoFocus/>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button className="btn btn-ghost" onClick={()=>setShowEmailDialog(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleSendAndSave} disabled={busy}>Send & Save</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* ── Scorecard grid ── */}
       {sel.length>0&&course&&(
         <div className="card">
@@ -3488,7 +3526,7 @@ function ScorecardPage({data,url,refresh}){
               <button className="btn btn-primary" onClick={submit} disabled={busy}
                 style={{opacity:canSubmit?1:0.5}}
                 title={canSubmit?"":"Need 14+ holes for 2+ players"}>
-                {busy?<><Spin/>Submitting…</>:"Submit"}
+                {busy?<><Spin/>Submitting…</>:"Submit & Email"}
               </button>
               <button className="btn btn-ghost" onClick={refreshHI} disabled={busy}
                 style={{border:"1.5px solid var(--blue)",color:"var(--blue)"}}
