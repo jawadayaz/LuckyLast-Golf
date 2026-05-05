@@ -2992,7 +2992,8 @@ function ScorecardPage({data,url,refresh}){
     if(!done){
       // Live scorecard: send link only, no image
       const liveLink=`${PAGES_BASE}?session=${sessionId}`;
-      const linkText="📱 Live scorecard: "+liveLink;
+      const liveScores=buildWaText();
+      const linkText="📱 Live scorecard: "+liveLink+(liveScores?"\n\n"+liveScores:"");
       if(navigator.share){
         try{
           await navigator.share({text:linkText,title:"Live Scorecard"});
