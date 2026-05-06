@@ -2991,9 +2991,9 @@ function ScorecardPage({data,url,refresh}){
   const sendWhatsApp=async()=>{
     if(!done){
       // Live scorecard: send link only, no image
+       
       const liveLink=`${PAGES_BASE}?session=${sessionId}`;
-      const liveScores=buildWaText();
-      const linkText="📱 Live scorecard: "+liveLink+(liveScores?"\n\n"+liveScores:"");
+      const linkText="📱 Live scorecard: "+liveLink;
       if(navigator.share){
         try{
           await navigator.share({text:linkText,title:"Live Scorecard"});
